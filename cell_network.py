@@ -14,11 +14,11 @@ from RRUCell import RRUCell
 
 # Hyperparameters
 vocabulary_size = 5000  # 88583 for this dataset is the max! (?)
-sequence_length = 500  # There are from 6 to 2493 words in our dataset! (?)  // max_words
+sequence_length = 500  # There are from 6 to 2493 words in our dataset! (?)
 batch_size = 64
 num_epochs = 50
-hidden_units = 512  # state_size
-embedding_size = 512  # In the main.py example we used lstm_hidden_units/ state_size (512) as embedding_size. 300 in tut
+hidden_units = 512
+embedding_size = 512
 num_classes = 2
 learning_rate = 0.001
 ckpt_path = 'ckpt/'
@@ -57,45 +57,45 @@ class LstmModel:
             # Extract the batch size - this allows for variable batch size
             current_batch_size = tf.shape(x)[0]
 
-            # Create LSTM Initial State of Zeros
+            # Create the initial state of zeros
             initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
 
-            # Wrap our lstm cell in a dropout wrapper
+            # Wrap our cell in a dropout wrapper
             cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
 
-            # Value will have all the outputs, we will need just the last one. _ hidden state between the steps
+            # Value will have all the outputs, we will need just the last. _ contains hidden states between the steps
             value, _ = tf.nn.dynamic_rnn(cell,
                                          embed_lookup,
                                          initial_state=initial_state,
                                          dtype=tf.float32)
 
             # Instantiate weights
-            weight = tf.Variable(tf.random_normal([hidden_units, num_classes]))
+            weight = tf.get_variable("weight", [hidden_units, num_classes])
             # Instantiate biases
             bias = tf.Variable(tf.constant(0.1, shape=[num_classes]))
 
             value = tf.transpose(value, [1, 0, 2])
 
             # Extract last output
-            last = tf.gather(value, int(value.get_shape()[0]) - 1)
+            last = value[-1]  # Seems to be taken correctly
 
-            prediction = (
-                        tf.matmul(last, weight) + bias)  # But what we actually do is calculate the loss over the batch
+            prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
 
             # predictions -        [1,1,0,0]
             # labels -             [1,0,0,1]
             # correct_prediction - [1,0,1,0]. We want accuracy over the batch, so we create a mean over it
-            correct_prediction = tf.equal(tf.argmax(tf.nn.sigmoid(prediction), axis=1), tf.argmax(y, axis=1))
+            correct_prediction = tf.equal(tf.argmax(prediction, axis=1), tf.argmax(y, axis=1))
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
             # Choice our model made
-            choice = tf.argmax(tf.nn.sigmoid(prediction), axis=1)
+            choice = tf.argmax(prediction, axis=1)
 
             # Calculate the loss given prediction and labels
             loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=prediction,
                                                                              labels=y))
 
-            # Declare our optimizer, in this case we use RMS Prop
+            # Declare our optimizer, we have to check which one works better
+            # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
             optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
             # Expose symbols to class
@@ -131,7 +131,7 @@ class LstmModel:
                         x_batch = x_train[i * batch_size: i * batch_size + batch_size]
                         y_batch = y_train[i * batch_size: i * batch_size + batch_size]
                     else:
-                        x_batch = x_train[i * batch_size:]  # Run the remaining sequences(that aren't full batch_size)
+                        x_batch = x_train[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
                         y_batch = y_train[i * batch_size:]
 
                     _, l, a = sess.run([self.optimizer, self.loss, self.accuracy], feed_dict={self.x: x_batch, self.y: y_batch})
@@ -169,7 +169,7 @@ class LstmModel:
                     x_batch = x_test[i * batch_size: i * batch_size + batch_size]
                     y_batch = y_test[i * batch_size: i * batch_size + batch_size]
                 else:
-                    x_batch = x_test[i * batch_size:]  # Run the remaining sequences(that aren't full batch_size)
+                    x_batch = x_test[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
                     y_batch = y_test[i * batch_size:]
 
                 l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch, self.y: y_batch})
@@ -182,7 +182,7 @@ class LstmModel:
                     print("Step", i, "of", num_batches, "Loss:", total_loss, "Accuracy:", total_accuracy)
             print("Final validation stats. Loss:", total_loss, "Accuracy:", total_accuracy)
 
-    def predict_test(self, x_test, y_test, index_to_word, n=10):  # This and the functions below needs the restoreSess 2
+    def predict_test(self, x_test, y_test, index_to_word, n=10):  # Not used right now, but it needs restore session
         with tf.Session() as sess:
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
@@ -202,7 +202,7 @@ class LstmModel:
             for i, text in enumerate(text):
                 print("{0}\n{1}\nPredicted - {2} - Actual - {3}\n{4}".format("-" * 30, text, c[i], labels[i], "-" * 30))
 
-    def predict_custom(self, sentences, tokenizer):
+    def predict_custom(self, sentences, tokenizer):  # Not used right now, but it needs restore session
         with tf.Session() as sess:
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
             x_test_sample = sequence.pad_sequences(tokenizer.texts_to_sequences(sentences), maxlen=sequence_length)
@@ -215,7 +215,7 @@ class LstmModel:
                 print("{0}\nPredicted - {1}\n{2}".format(sentence, c[index], "-" * 30))
 
     @staticmethod
-    def translate_seq_to_text(seqs, index_to_word):
+    def translate_seq_to_text(seqs, index_to_word):  # Not used right now
         words = []
         for seq in seqs:
             seq = np.trim_zeros(seq)
@@ -224,7 +224,7 @@ class LstmModel:
 
 
 def parse_args():  # Parse arguments
-    parser = argparse.ArgumentParser(description='LSTM RNN for sentiment analysis with BasicLSTMCell')
+    parser = argparse.ArgumentParser(description='Different RNN cell comparison for IMDB review sentiment analysis')
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('-t', '--train', action='store_true', help='train model')
     group.add_argument('-v', '--validate', action='store_true', help='validate model')
@@ -235,7 +235,8 @@ def parse_args():  # Parse arguments
 if __name__ == '__main__':  # Main function
     ARGS = parse_args()  # Parse arguments - find out train or validate
 
-    X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, WORD_TO_INDEX, INDEX_TO_WORD, T = load_all_data_cell(vocabulary_size, sequence_length)
+    X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, WORD_TO_INDEX, INDEX_TO_WORD, T = load_all_data_cell(vocabulary_size,
+                                                                                           sequence_length)
 
     NUM_BATCHES = len(X_TRAIN) // batch_size
 
