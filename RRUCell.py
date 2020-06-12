@@ -1,0 +1,211 @@
+# Code reference - https://github.com/tensorflow/tensorflow/blob/v2.2.0/tensorflow/python/ops/rnn_cell_impl.py#L484-L614
+"""Module implementing RNN Cells.
+This module provides a number of basic commonly used RNN cells, such as LSTM
+(Long Short Term Memory) or GRU (Gated Recurrent Unit), and a number of
+operators that allow adding dropouts, projections, or embeddings for inputs.
+Constructing multi-layer cells is supported by the class `MultiRNNCell`, or by
+calling the `rnn` ops several times.
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import tensorflow as tf
+import numpy as np
+from tensorflow.python.eager import context
+from tensorflow.python.framework import dtypes
+from tensorflow.python.keras import activations
+from tensorflow.python.keras import initializers
+from tensorflow.python.keras.engine import input_spec
+from tensorflow.python.keras.utils import tf_utils
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import init_ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import nn_ops
+from tensorflow.python.ops.rnn_cell_impl import LayerRNNCell
+from tensorflow.python.platform import tf_logging as logging
+from tensorflow.python.util import nest
+from tensorflow.python.util.deprecation import deprecated
+
+_BIAS_VARIABLE_NAME = "bias"
+_WEIGHTS_VARIABLE_NAME = "kernel"
+
+
+def inv_sigmoid(y):
+    return np.log(y / (1 - y))
+
+
+residual_weight = 0.9  # r
+candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
+S_initial_value = inv_sigmoid(residual_weight)
+
+
+class RRUCell(LayerRNNCell):
+    """Gated Recurrent Unit cell.
+    Note that this cell is not optimized for performance. Please use
+    `tf.contrib.cudnn_rnn.CudnnGRU` for better performance on GPU, or
+    `tf.contrib.rnn.GRUBlockCellV2` for better performance on CPU.
+    Args:
+        num_units: int, The number of units in the GRU cell.
+        activation: Nonlinearity to use.  Default: `tanh`.
+        reuse: (optional) Python boolean describing whether to reuse variables in an
+            existing scope.  If not `True`, and the existing scope already has the
+            given variables, an error is raised.
+        kernel_initializer: (optional) The initializer to use for the weight and
+            projection matrices.
+        bias_initializer: (optional) The initializer to use for the bias.
+        name: String, the name of the layer. Layers with the same name will share
+            weights, but to avoid mistakes we require reuse=True in such cases.
+        dtype: Default dtype of the layer (default of `None` means use the type of
+            the first input). Required when `build` is called before `call`.
+        **kwargs: Dict, keyword named properties for common layer attributes, like
+            `trainable` etc when constructing the cell from configs of get_config().
+            References:
+        Learning Phrase Representations using RNN Encoder Decoder for Statistical
+        Machine Translation:
+            [Cho et al., 2014]
+            (https://aclanthology.coli.uni-saarland.de/papers/D14-1179/d14-1179)
+            ([pdf](http://emnlp2014.org/papers/pdf/EMNLP2014179.pdf))
+    """
+
+    @deprecated(None, "This class is not equivalent as tf.keras.layers.GRUCell,"
+                      " and will be replaced by that in Tensorflow 2.0.")
+    def __init__(self,
+                 num_units,
+                 activation=None,
+                 reuse=None,
+                 kernel_initializer=None,
+                 bias_initializer=None,
+                 name=None,
+                 dtype=None,
+                 **kwargs):
+        super(RRUCell, self).__init__(_reuse=reuse, name=name, dtype=dtype, **kwargs)
+        _check_supported_dtypes(self.dtype)
+
+        if context.executing_eagerly() and context.num_gpus() > 0:
+            logging.warn(
+                "%s: Note that this cell is not optimized for performance. "
+                "Please use tf.contrib.cudnn_rnn.CudnnGRU for better "
+                "performance on GPU.", self)
+        # Inputs must be 2-dimensional.
+        self.input_spec = input_spec.InputSpec(ndim=2)
+
+        self._num_units = num_units
+        if activation:
+            self._activation = activations.get(activation)
+        else:
+            self._activation = math_ops.tanh
+        self._kernel_initializer = initializers.get(kernel_initializer)
+        self._bias_initializer = initializers.get(bias_initializer)
+
+    @property
+    def state_size(self):
+        return self._num_units
+
+    @property
+    def output_size(self):
+        return self._num_units
+
+    @tf_utils.shape_type_conversion
+    def build(self, inputs_shape):
+        if inputs_shape[-1] is None:
+            raise ValueError("Expected inputs.shape[-1] to be known, saw shape: %s" % str(inputs_shape))
+        _check_supported_dtypes(self.dtype)
+        input_depth = inputs_shape[-1]
+        total = input_depth + self._num_units
+        self._Z_kernel = self.add_variable(
+            "Z/%s" % _WEIGHTS_VARIABLE_NAME,
+            shape=[total, 2 * total],
+            initializer=self._kernel_initializer)
+        self._Z_bias = self.add_variable(
+            "Z/%s" % _BIAS_VARIABLE_NAME,
+            shape=[2 * total],
+            initializer=self._bias_initializer)
+        self._S_bias = self.add_variable(
+            "S/%s" % _BIAS_VARIABLE_NAME,
+            shape=[self._num_units],
+            # initializer=self._bias_initializer)  # This worked, but I want to get initial value for s to be inv sigm r
+            initializer=(self._bias_initializer
+                         if self._bias_initializer is not None else
+                         init_ops.constant_initializer(S_initial_value, dtype=self.dtype)))
+        self._W_kernel = self.add_variable(
+            "W/%s" % _WEIGHTS_VARIABLE_NAME,
+            shape=[2 * total, self._num_units],
+            initializer=self._kernel_initializer)
+        self._W_bias = self.add_variable(
+            "W/%s" % _BIAS_VARIABLE_NAME,
+            shape=[self._num_units],
+            initializer=self._bias_initializer)
+
+        self.built = True
+
+    def call(self, inputs, state):
+        """Gated recurrent unit (GRU) with nunits cells."""
+        _check_rnn_cell_input_dtypes([inputs, state])
+
+        # LOWER PART OF THE CELL
+        # Concatenate input and last state
+        input_and_state = array_ops.concat([inputs, state], 1)  # Inputs are 1 (not batch size), right?
+
+        # Go through first, Z transformation
+        after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
+
+        # Do instance normalization
+        after_inst_norm = instance_norm(after_z)
+
+        # Do GELU activation
+        after_gelu = gelu(after_inst_norm)
+
+        # Go through the second transformation - W
+        after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
+
+        # Merge upper and lower parts
+        final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
+
+        return final, final
+
+    def get_config(self):
+        config = {
+            "num_units": self._num_units,
+            "kernel_initializer": initializers.serialize(self._kernel_initializer),
+            "bias_initializer": initializers.serialize(self._bias_initializer),
+            "activation": activations.serialize(self._activation),
+            "reuse": self._reuse,
+        }
+        base_config = super(RRUCell, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+def _check_rnn_cell_input_dtypes(inputs):
+    """Check whether the input tensors are with supported dtypes.
+    Default RNN cells only support floats and complex as its dtypes since the
+    activation function (tanh and sigmoid) only allow those types. This function
+    will throw a proper error message if the inputs is not in a supported type.
+    Args:
+        inputs: tensor or nested structure of tensors that are feed to RNN cell as
+            input or state.
+        Raises:
+            ValueError: if any of the input tensor are not having dtypes of float or
+            complex.
+    """
+    for t in nest.flatten(inputs):
+        _check_supported_dtypes(t.dtype)
+
+
+def _check_supported_dtypes(dtype):
+    if dtype is None:
+        return
+    dtype = dtypes.as_dtype(dtype)
+    if not (dtype.is_floating or dtype.is_complex):
+        raise ValueError("RNN cell only supports floating point inputs, " "but saw dtype: %s" % dtype)
+
+
+def gelu(x):
+    return x * tf.sigmoid(1.702 * x)
+
+
+def instance_norm(cur):
+    """Normalize each element based on variance"""
+    variance = tf.reduce_mean(tf.square(cur), [-1], keepdims=True)
+    cur = cur * tf.rsqrt(variance + 1e-6)
+    return cur
