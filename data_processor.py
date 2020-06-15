@@ -1,8 +1,9 @@
+import tensorflow as tf
+import numpy as np
+
 from keras.preprocessing.text import Tokenizer
 import tensorflow_datasets as tdfs
 from keras.preprocessing import sequence
-
-import numpy as np
 
 
 def process(raw_text, vocabulary_size):
@@ -38,7 +39,7 @@ def load_data(train_or_test):
     return x, y
 
 
-def load_all_data(vocabulary_size, max_words):
+def load_all_data(vocabulary_size, max_words):  # This function is used by LSTM_with_tf_scan.py, which we aren't using
     # Loading the data in the given format, x -> list of strings, y -> list of integers
     x_train, y_train = load_data('train')
     x_test, y_test = load_data('test')
@@ -66,6 +67,9 @@ def load_all_data_cell(vocabulary_size, max_words):  # Duplicated code, but I di
     x_train, word_to_index, index_to_word, t = process(x_train, vocabulary_size)
     x_test = t.texts_to_sequences(x_test)
 
+    # print('Maximum review length: {}'.format(len(max((x_train + x_test), key=len))))  # 2493
+    # print('Minimum review length: {}'.format(len(min((x_train + x_test), key=len))))  # 6
+
     x_train = sequence.pad_sequences(x_train, maxlen=max_words)
     x_test = sequence.pad_sequences(x_test, maxlen=max_words)
 
@@ -81,3 +85,16 @@ def one_hot_encode(labels):
     one_hot_encoded = np.zeros((n_labels, n_unique_labels))  # now its [0 0] [0 0]
     one_hot_encoded[np.arange(n_labels), labels] = 1  # now its [1 0] [0 1]
     return one_hot_encoded
+
+
+def load_imdb_data(num_words, maxlen):
+    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.imdb.load_data(num_words=num_words,
+                                                                            maxlen=maxlen)
+
+    x_train = sequence.pad_sequences(x_train, maxlen=maxlen)  # padding='post'
+    # print(len(x_train[101]) - np.count_nonzero(x_train[101] == 0))  # Count of nonpadded symbols
+    x_test = sequence.pad_sequences(x_test, maxlen=maxlen)
+
+    y_train = one_hot_encode(y_train)
+    y_test = one_hot_encode(y_test)
+    return x_train, y_train, x_test, y_test

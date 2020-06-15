@@ -8,15 +8,16 @@ from keras.preprocessing import sequence
 
 from data_processor import load_all_data_cell
 from data_processor import one_hot_encode
+from data_processor import load_imdb_data
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 from RRUCell import RRUCell
 
 # Hyperparameters
-vocabulary_size = 10000  # 88583 for this dataset is the max! (?)
-sequence_length = 500  # There are from 6 to 2493 words in our dataset! (?)
+vocabulary_size = 10000  # 88583 for tfds is the max. 24902 for tf.keras is the max
+sequence_length = 500  # There are from 70 to 2697 words in tf.keras dataset and from 6 to 2493 words in tdfs dataset!
 batch_size = 64
-num_epochs = 10
+num_epochs = 5
 hidden_units = 128
 embedding_size = 256
 num_classes = 2
@@ -247,9 +248,9 @@ def parse_args():  # Parse arguments
 if __name__ == '__main__':  # Main function
     ARGS = parse_args()  # Parse arguments - find out train or validate
 
-    X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, WORD_TO_INDEX, INDEX_TO_WORD, T = load_all_data_cell(vocabulary_size,
-                                                                                           sequence_length)
-
+    # X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, WORD_TO_ID, ID_TO_WORD, T = load_all_data_cell(vocabulary_size, sequence_length)
+    X_TRAIN, Y_TRAIN, X_TEST, Y_TEST = load_imdb_data(vocabulary_size, sequence_length)
+    # '''
     NUM_BATCHES = len(X_TRAIN) // batch_size
 
     model = LstmModel()  # Create the model
@@ -259,6 +260,7 @@ if __name__ == '__main__':  # Main function
         model.train(X_TRAIN, Y_TRAIN, NUM_BATCHES)
     elif ARGS['validate']:
         model.validate(X_TEST, Y_TEST, NUM_BATCHES)
+    # '''
     '''
     elif ARGS['custom']:
         SENTENCES = [
