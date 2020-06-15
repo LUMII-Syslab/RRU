@@ -4,20 +4,23 @@ import numpy as np
 import argparse
 
 from sklearn.utils import shuffle
-from keras.preprocessing import sequence
 
-from data_processor import load_all_data_cell
-from data_processor import one_hot_encode
-from data_processor import load_imdb_data
+# Importing functions to load the data in the correct format, one function for tf dataset, one function for tfds dataset
+from data_processor import load_data_tdfs
+from data_processor import load_data_tf
+
+from data_processor import get_sequence_lengths
+
+# Importing the different cells we are using, RRU being the self-made one
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 from RRUCell import RRUCell
 
 # Hyperparameters
 vocabulary_size = 10000  # 88583 for tfds is the max. 24902 for tf.keras is the max
-sequence_length = 500  # There are from 70 to 2697 words in tf.keras dataset and from 6 to 2493 words in tdfs dataset!
+max_sequence_length = None  # 70 - 2697 words in tf.keras and 6 - 2493 words in tdfs. This will be set automatically!
 batch_size = 64
-num_epochs = 5
+num_epochs = 10
 hidden_units = 128
 embedding_size = 256
 num_classes = 2
@@ -38,9 +41,11 @@ class LstmModel:
             tf.reset_default_graph()  # Build the graph
 
             # Batch size list of integer sequences
-            x = tf.placeholder(tf.int32, shape=[None, sequence_length], name="x")
+            x = tf.placeholder(tf.int32, shape=[None, max_sequence_length], name="x")
             # One hot labels for sentiment classification
             y = tf.placeholder(tf.int32, shape=[None, num_classes], name="y")
+            # Batch size list of sequence lengths, so we can get variable sequence length rnn
+            sequence_length = tf.placeholder(tf.int32, [None])
 
             # Cast our label to float32. Later it will be better when it does some math (?)
             y = tf.cast(y, tf.float32)
@@ -67,20 +72,22 @@ class LstmModel:
             cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
 
             # Value will have all the outputs, we will need just the last. _ contains hidden states between the steps
-            value, _ = tf.nn.dynamic_rnn(cell,
-                                         embed_lookup,
-                                         initial_state=initial_state,
-                                         dtype=tf.float32)
+            value, state = tf.nn.dynamic_rnn(cell,
+                                             embed_lookup,
+                                             initial_state=initial_state,
+                                             dtype=tf.float32,
+                                             sequence_length=sequence_length)
 
             # Instantiate weights
             weight = tf.get_variable("weight", [hidden_units, num_classes])
             # Instantiate biases
             bias = tf.Variable(tf.constant(0.1, shape=[num_classes]))
 
-            value = tf.transpose(value, [1, 0, 2])
-
-            # Extract last output
-            last = value[-1]  # Seems to be taken correctly
+            '''Non-variable sequence length dynamic.rnn'''
+            # value = tf.transpose(value, [1, 0, 2])  # After this it's max_time, batch_size, hidden_units
+            # last = value[-1]  # Extract last output. Should be batch_size hidden_units
+            '''Variable sequence length'''
+            last = state
 
             prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
 
@@ -107,6 +114,7 @@ class LstmModel:
             # Expose symbols to class
             self.x = x
             self.y = y
+            self.sequence_length = sequence_length
             self.loss = loss
             self.optimizer = optimizer
             self.accuracy = accuracy
@@ -129,7 +137,7 @@ class LstmModel:
             train_writer.add_graph(sess.graph)
 
             for epoch in range(num_epochs):
-                print("---- Epoch", epoch + 1, "out of", num_epochs, "----")
+                print("------ Epoch", epoch + 1, "out of", num_epochs, "------")
                 if epoch > 0:
                     data = list(zip(x_train, y_train))
                     shuffle(data)
@@ -144,9 +152,12 @@ class LstmModel:
                     else:
                         x_batch = x_train[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
                         y_batch = y_train[i * batch_size:]
+                    sequence_lengths = get_sequence_lengths(x_batch)
 
                     s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
-                                          feed_dict={self.x: x_batch, self.y: y_batch})
+                                          feed_dict={self.x: x_batch,
+                                                     self.y: y_batch,
+                                                     self.sequence_length: sequence_lengths})
 
                     train_writer.add_summary(s, i + epoch * num_batches)
                     total_loss += l
@@ -184,8 +195,11 @@ class LstmModel:
                 else:
                     x_batch = x_test[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
                     y_batch = y_test[i * batch_size:]
+                sequence_lengths = get_sequence_lengths(x_batch)
 
-                l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch, self.y: y_batch})
+                l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch,
+                                                                       self.y: y_batch,
+                                                                       self.sequence_length: sequence_lengths})
                 total_loss += l
                 if i == 0:
                     total_accuracy = a
@@ -194,46 +208,6 @@ class LstmModel:
                 if i > 0 and i % 100 == 0:
                     print("Step", i, "of", num_batches, "Loss:", total_loss, "Accuracy:", total_accuracy)
             print("Final validation stats. Loss:", total_loss, "Accuracy:", total_accuracy)
-
-    def predict_test(self, x_test, y_test, index_to_word, n=10):  # Not used right now, but it needs restore session
-        with tf.Session() as sess:
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
-
-            # Make random choice of n samples from test set
-            rand_idx = np.random.choice(np.arange(len(x_test)), n, replace=False)
-            x_test_sample = x_test[rand_idx]
-            y_test_sample = y_test[rand_idx]
-
-            # Run the model to get it's prediction
-            c = sess.run([self.choice], feed_dict={self.x: x_test_sample, self.y: y_test_sample})
-
-            # Get text from the index sequences
-            text = self.translate_seq_to_text(x_test_sample, index_to_word)
-
-            labels = np.argmax(y_test_sample, axis=1)  # Will turn [0,1]->1 and [1,0]->0
-
-            for i, text in enumerate(text):
-                print("{0}\n{1}\nPredicted - {2} - Actual - {3}\n{4}".format("-" * 30, text, c[i], labels[i], "-" * 30))
-
-    def predict_custom(self, sentences, tokenizer):  # Not used right now, but it needs restore session
-        with tf.Session() as sess:
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
-            x_test_sample = sequence.pad_sequences(tokenizer.texts_to_sequences(sentences), maxlen=sequence_length)
-            y_test_sample = one_hot_encode(np.zeros(len(x_test_sample)))  # Dummy y because TensorFlow needs it to run
-
-            # Run the model to get the predictions
-            c = sess.run([self.choice], feed_dict={self.x: x_test_sample, self.y: y_test_sample})
-
-            for index, sentence in enumerate(sentences):
-                print("{0}\nPredicted - {1}\n{2}".format(sentence, c[index], "-" * 30))
-
-    @staticmethod
-    def translate_seq_to_text(seqs, index_to_word):  # Not used right now
-        words = []
-        for seq in seqs:
-            seq = np.trim_zeros(seq)
-            words.append(" ".join([index_to_word[idx] for idx in seq]))
-        return words
 
 
 def parse_args():  # Parse arguments
@@ -248,8 +222,10 @@ def parse_args():  # Parse arguments
 if __name__ == '__main__':  # Main function
     ARGS = parse_args()  # Parse arguments - find out train or validate
 
-    # X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, WORD_TO_ID, ID_TO_WORD, T = load_all_data_cell(vocabulary_size, sequence_length)
-    X_TRAIN, Y_TRAIN, X_TEST, Y_TEST = load_imdb_data(vocabulary_size, sequence_length)
+    # Load or dataset
+    # X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, WORD_TO_ID, ID_TO_WORD, T, max_sequence_length = load_data_tdfs(vocabulary_size)
+    X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, max_sequence_length = load_data_tf(vocabulary_size)
+
     # '''
     NUM_BATCHES = len(X_TRAIN) // batch_size
 
@@ -261,11 +237,3 @@ if __name__ == '__main__':  # Main function
     elif ARGS['validate']:
         model.validate(X_TEST, Y_TEST, NUM_BATCHES)
     # '''
-    '''
-    elif ARGS['custom']:
-        SENTENCES = [
-            "This movie was just incredible, loved it, I hate people who hate this movie, they are just terrible",
-            "Terrible anime, why did anyone create this abomination!!!!!!!!!!!!!!!!!1",
-            "Great TV Show"]
-        model.predict_custom(SENTENCES, T)
-    '''
