@@ -13,18 +13,20 @@ from GRUCell import GRUCell
 from RRUCell import RRUCell
 
 # Hyperparameters
-vocabulary_size = 5000  # 88583 for this dataset is the max! (?)
+vocabulary_size = 10000  # 88583 for this dataset is the max! (?)
 sequence_length = 500  # There are from 6 to 2493 words in our dataset! (?)
 batch_size = 64
-num_epochs = 50
-hidden_units = 512
-embedding_size = 512
+num_epochs = 10
+hidden_units = 128
+embedding_size = 256
 num_classes = 2
 learning_rate = 0.001
 ckpt_path = 'ckpt/'
+log_path = 'logdir/'
 # model_name = 'lstm_model'
 # model_name = 'gru_model'
 model_name = 'rru_model'
+output_path = log_path + model_name + '/rmsprop'
 
 
 class LstmModel:
@@ -86,6 +88,7 @@ class LstmModel:
             # correct_prediction - [1,0,1,0]. We want accuracy over the batch, so we create a mean over it
             correct_prediction = tf.equal(tf.argmax(prediction, axis=1), tf.argmax(y, axis=1))
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+            tf.summary.scalar("accuracy", accuracy)
 
             # Choice our model made
             choice = tf.argmax(prediction, axis=1)
@@ -93,8 +96,10 @@ class LstmModel:
             # Calculate the loss given prediction and labels
             loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=prediction,
                                                                              labels=y))
+            tf.summary.scalar("loss", loss)
 
-            # Declare our optimizer, we have to check which one works better
+            # Declare our optimizer, we have to check which one works better.
+            # Before: Adam gave better training accuracy and loss, but RMSProp gave better validation accuracy and loss
             # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
             optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
@@ -117,6 +122,11 @@ class LstmModel:
         with tf.Session() as sess:
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
+            # Adding a writer so we can visualize accuracy and loss on TensorBoard
+            merged_summary = tf.summary.merge_all()
+            train_writer = tf.summary.FileWriter(output_path)
+            train_writer.add_graph(sess.graph)
+
             for epoch in range(num_epochs):
                 print("---- Epoch", epoch + 1, "out of", num_epochs, "----")
                 if epoch > 0:
@@ -134,8 +144,10 @@ class LstmModel:
                         x_batch = x_train[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
                         y_batch = y_train[i * batch_size:]
 
-                    _, l, a = sess.run([self.optimizer, self.loss, self.accuracy], feed_dict={self.x: x_batch, self.y: y_batch})
+                    s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
+                                          feed_dict={self.x: x_batch, self.y: y_batch})
 
+                    train_writer.add_summary(s, i + epoch * num_batches)
                     total_loss += l
                     if i == 0:
                         total_accuracy = a
