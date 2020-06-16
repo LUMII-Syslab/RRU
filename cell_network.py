@@ -25,6 +25,7 @@ hidden_units = 128
 embedding_size = 256
 num_classes = 2
 learning_rate = 0.001
+output_keep_prob = 0.85
 ckpt_path = 'ckpt/'
 log_path = 'logdir/'
 # model_name = 'lstm_model'
@@ -45,7 +46,9 @@ class LstmModel:
             # One hot labels for sentiment classification
             y = tf.placeholder(tf.int32, shape=[None, num_classes], name="y")
             # Batch size list of sequence lengths, so we can get variable sequence length rnn
-            sequence_length = tf.placeholder(tf.int32, [None])
+            sequence_length = tf.placeholder(tf.int32, [None], name="sequence_length")
+            # Output drop probability so we can pass different values depending on training/ testing
+            output_drop_prob = tf.placeholder(tf.float32, name='output_drop_prob')
 
             # Cast our label to float32. Later it will be better when it does some math (?)
             y = tf.cast(y, tf.float32)
@@ -69,7 +72,7 @@ class LstmModel:
             initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
 
             # Wrap our cell in a dropout wrapper
-            cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
+            # cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
 
             # Value will have all the outputs, we will need just the last. _ contains hidden states between the steps
             value, state = tf.nn.dynamic_rnn(cell,
@@ -88,6 +91,8 @@ class LstmModel:
             # last = value[-1]  # Extract last output. Should be batch_size hidden_units
             '''Variable sequence length'''
             last = state
+
+            last = tf.nn.dropout(last, rate=output_drop_prob)
 
             prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
 
@@ -115,6 +120,7 @@ class LstmModel:
             self.x = x
             self.y = y
             self.sequence_length = sequence_length
+            self.output_drop_prob = output_drop_prob
             self.loss = loss
             self.optimizer = optimizer
             self.accuracy = accuracy
@@ -157,7 +163,8 @@ class LstmModel:
                     s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
                                           feed_dict={self.x: x_batch,
                                                      self.y: y_batch,
-                                                     self.sequence_length: sequence_lengths})
+                                                     self.sequence_length: sequence_lengths,
+                                                     self.output_drop_prob: 1 - output_keep_prob})
 
                     train_writer.add_summary(s, i + epoch * num_batches)
                     total_loss += l
@@ -199,7 +206,8 @@ class LstmModel:
 
                 l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch,
                                                                        self.y: y_batch,
-                                                                       self.sequence_length: sequence_lengths})
+                                                                       self.sequence_length: sequence_lengths,
+                                                                       self.output_drop_prob: 0.})
                 total_loss += l
                 if i == 0:
                     total_accuracy = a
