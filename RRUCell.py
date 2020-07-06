@@ -41,8 +41,8 @@ S_initial_value = inv_sigmoid(residual_weight)
 
 
 class RRUCell(LayerRNNCell):
-    """Gated Recurrent Unit cell.
-    Note that this cell is not optimized for performance. Please use
+    """Residual Recurrent Unit cell.
+    Note that this cell is not optimized for performance. It might be wise to implement it with
     `tf.contrib.cudnn_rnn.CudnnGRU` for better performance on GPU, or
     `tf.contrib.rnn.GRUBlockCellV2` for better performance on CPU.
     Args:
@@ -68,10 +68,9 @@ class RRUCell(LayerRNNCell):
             ([pdf](http://emnlp2014.org/papers/pdf/EMNLP2014179.pdf))
     """
 
-    @deprecated(None, "This class is not equivalent as tf.keras.layers.GRUCell,"
-                      " and will be replaced by that in Tensorflow 2.0.")
     def __init__(self,
                  num_units,
+                 group_size=32,
                  activation=None,
                  reuse=None,
                  kernel_initializer=None,
@@ -85,7 +84,7 @@ class RRUCell(LayerRNNCell):
         if context.executing_eagerly() and context.num_gpus() > 0:
             logging.warn(
                 "%s: Note that this cell is not optimized for performance. "
-                "Please use tf.contrib.cudnn_rnn.CudnnGRU for better "
+                "We could try to implement RRU with tf.contrib.cudnn_rnn.CudnnGRU as base for better "
                 "performance on GPU.", self)
         # Inputs must be 2-dimensional.
         self.input_spec = input_spec.InputSpec(ndim=2)
@@ -97,6 +96,7 @@ class RRUCell(LayerRNNCell):
             self._activation = math_ops.tanh
         self._kernel_initializer = initializers.get(kernel_initializer)
         self._bias_initializer = initializers.get(bias_initializer)
+        self._group_size = group_size
 
     @property
     def state_size(self):
@@ -140,21 +140,29 @@ class RRUCell(LayerRNNCell):
         self.built = True
 
     def call(self, inputs, state):
-        """Gated recurrent unit (GRU) with nunits cells."""
+        """Residual recurrent unit (RRU) with nunits cells."""
         _check_rnn_cell_input_dtypes([inputs, state])
 
         # LOWER PART OF THE CELL
         # Concatenate input and last state
-        input_and_state = array_ops.concat([inputs, state], 1)  # Inputs are 1 (not batch size), right?
+        input_and_state = array_ops.concat([inputs, state], 1)  # Inputs are batch_size x depth
 
         # Go through first, Z transformation
         after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
 
-        # Do instance normalization
-        after_inst_norm = instance_norm(after_z)
+        group_size = self._group_size
+        # Do normalization
+        if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
+            # Do instance normalization
+            after_norm = instance_norm(after_z)
+        else:
+            # Do group normalization
+            after_norm = group_norm(after_z, group_size)
+
+        # after_norm = instance_norm(after_z)  # If you can't get upper part working
 
         # Do GELU activation
-        after_gelu = gelu(after_inst_norm)
+        after_gelu = gelu(after_norm)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
@@ -197,11 +205,22 @@ def _check_supported_dtypes(dtype):
         return
     dtype = dtypes.as_dtype(dtype)
     if not (dtype.is_floating or dtype.is_complex):
-        raise ValueError("RNN cell only supports floating point inputs, " "but saw dtype: %s" % dtype)
+        raise ValueError("RRU cell only supports floating point inputs, " "but saw dtype: %s" % dtype)
 
 
 def gelu(x):
     return x * tf.sigmoid(1.702 * x)
+
+
+def group_norm(cur, group_size=32):
+    cur = tf.convert_to_tensor(cur, dtype=tf.float32)
+    # These bottom 2 throw error if they are not done separately
+    b = tf.shape(cur)[0]
+    s = tf.shape(cur)[1]
+    cur = tf.reshape(cur, [s // group_size, b, group_size])
+    tf.vectorized_map(instance_norm, cur)  # tf.vectorized_map supposedly is faster than tf.map_fn
+    cur = tf.reshape(cur, [b, s])
+    return cur
 
 
 def instance_norm(cur):

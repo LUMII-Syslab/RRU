@@ -15,6 +15,7 @@ from data_processor import get_sequence_lengths
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 from RRUCell import RRUCell
+from RRUCell import instance_norm
 
 # Hyperparameters
 vocabulary_size = 10000  # 88583 for tfds is the max. 24902 for tf.keras is the max
@@ -22,16 +23,17 @@ max_sequence_length = None  # 70 - 2697 words in tf.keras and 6 - 2493 words in 
 batch_size = 64
 num_epochs = 10
 hidden_units = 128
-embedding_size = 256
+embedding_size = 32
 num_classes = 2
+group_size = None  # None if you want casual instance norm, for example, 32, if you want 32
 learning_rate = 0.001
-output_keep_prob = 0.85
+output_keep_prob = 1.0  # 0.85. For now we disable dropout like this, but we can delete the code later as well
 ckpt_path = 'ckpt/'
 log_path = 'logdir/'
 # model_name = 'lstm_model'
 # model_name = 'gru_model'
 model_name = 'rru_model'
-output_path = log_path + model_name + '/rmsprop'
+output_path = log_path + model_name + '/h128e10groupNonetestertester'
 
 
 class LstmModel:
@@ -63,7 +65,7 @@ class LstmModel:
             # Create LSTM/GRU/RRU Cell
             # cell = BasicLSTMCell(hidden_units)
             # cell = GRUCell(hidden_units)
-            cell = RRUCell(hidden_units)
+            cell = RRUCell(hidden_units, group_size=group_size)
 
             # Extract the batch size - this allows for variable batch size
             current_batch_size = tf.shape(x)[0]
@@ -234,7 +236,6 @@ if __name__ == '__main__':  # Main function
     # X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, WORD_TO_ID, ID_TO_WORD, T, max_sequence_length = load_data_tdfs(vocabulary_size)
     X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, max_sequence_length = load_data_tf(vocabulary_size)
 
-    # '''
     NUM_BATCHES = len(X_TRAIN) // batch_size
 
     model = LstmModel()  # Create the model
@@ -244,4 +245,3 @@ if __name__ == '__main__':  # Main function
         model.train(X_TRAIN, Y_TRAIN, NUM_BATCHES)
     elif ARGS['validate']:
         model.validate(X_TEST, Y_TEST, NUM_BATCHES)
-    # '''
