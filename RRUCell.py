@@ -212,14 +212,14 @@ def gelu(x):
     return x * tf.sigmoid(1.702 * x)
 
 
-def group_norm(cur, group_size=32):
-    cur = tf.convert_to_tensor(cur, dtype=tf.float32)
-    # These bottom 2 throw error if they are not done separately
-    b = tf.shape(cur)[0]
-    s = tf.shape(cur)[1]
-    cur = tf.reshape(cur, [s // group_size, b, group_size])
-    tf.vectorized_map(instance_norm, cur)  # tf.vectorized_map supposedly is faster than tf.map_fn
-    cur = tf.reshape(cur, [b, s])
+def group_norm(cur, group_size):
+    shape = tf.shape(cur) # runtime shape
+    n_units = cur.get_shape().as_list()[-1] # static shape
+    n_groups = n_units//group_size
+    assert group_size*n_groups == n_units
+    cur = tf.reshape(cur, [-1]+[n_groups]+[group_size])
+    cur = instance_norm(cur)
+    cur = tf.reshape(cur, shape)
     return cur
 
 
