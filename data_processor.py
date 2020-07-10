@@ -1,9 +1,9 @@
 import tensorflow as tf
 import numpy as np
 
-from keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.text import Tokenizer
 import tensorflow_datasets as tdfs
-from keras.preprocessing import sequence
+from tensorflow.keras.preprocessing import sequence
 
 
 def process(raw_text, vocabulary_size):

@@ -35,7 +35,7 @@ def inv_sigmoid(y):
     return np.log(y / (1 - y))
 
 
-residual_weight = 0.9  # r
+residual_weight = 0.95  # r
 candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
 S_initial_value = inv_sigmoid(residual_weight)
 
@@ -73,8 +73,7 @@ class RRUCell(LayerRNNCell):
                  group_size=32,
                  activation=None,
                  reuse=None,
-                 kernel_initializer=None,
-                 bias_initializer=None,
+                 dropout_rate = 0.0,
                  name=None,
                  dtype=None,
                  **kwargs):
@@ -94,9 +93,10 @@ class RRUCell(LayerRNNCell):
             self._activation = activations.get(activation)
         else:
             self._activation = math_ops.tanh
-        self._kernel_initializer = initializers.get(kernel_initializer)
-        self._bias_initializer = initializers.get(bias_initializer)
+        self._kernel_initializer = None
+        self._bias_initializer = tf.zeros_initializer()
         self._group_size = group_size
+        self._dropout_rate = dropout_rate
 
     @property
     def state_size(self):
@@ -145,7 +145,8 @@ class RRUCell(LayerRNNCell):
 
         # LOWER PART OF THE CELL
         # Concatenate input and last state
-        input_and_state = array_ops.concat([inputs, state], 1)  # Inputs are batch_size x depth
+        state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
+        input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
 
         # Go through first, Z transformation
         after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias

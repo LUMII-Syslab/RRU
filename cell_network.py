@@ -27,7 +27,7 @@ embedding_size = 32
 num_classes = 2
 group_size = None  # None if you want casual instance norm, for example, 32, if you want 32
 learning_rate = 0.001
-output_keep_prob = 1.0  # 0.85. For now we disable dropout like this, but we can delete the code later as well
+output_keep_prob = 0.9  # 0.85. For now we disable dropout like this, but we can delete the code later as well
 ckpt_path = 'ckpt/'
 log_path = 'logdir/'
 # model_name = 'lstm_model'
@@ -65,7 +65,7 @@ class LstmModel:
             # Create LSTM/GRU/RRU Cell
             # cell = BasicLSTMCell(hidden_units)
             # cell = GRUCell(hidden_units)
-            cell = RRUCell(hidden_units, group_size=group_size)
+            cell = RRUCell(hidden_units, group_size=group_size, dropout_rate = output_drop_prob)
 
             # Extract the batch size - this allows for variable batch size
             current_batch_size = tf.shape(x)[0]
@@ -94,7 +94,7 @@ class LstmModel:
             '''Variable sequence length'''
             last = state
 
-            last = tf.nn.dropout(last, rate=output_drop_prob)
+            #last = tf.nn.dropout(last, rate=output_drop_prob)
 
             prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
 
@@ -109,14 +109,15 @@ class LstmModel:
             choice = tf.argmax(prediction, axis=1)
 
             # Calculate the loss given prediction and labels
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=prediction,
-                                                                             labels=y))
+            # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=prediction,
+            #                                                                  labels=y))
+            loss = tf.losses.softmax_cross_entropy(onehot_labels=y, logits=prediction, label_smoothing=0.1)
             tf.summary.scalar("loss", loss)
 
             # Declare our optimizer, we have to check which one works better.
             # Before: Adam gave better training accuracy and loss, but RMSProp gave better validation accuracy and loss
-            # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
-            optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
+            optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+            #optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
             # Expose symbols to class
             self.x = x
@@ -241,7 +242,6 @@ if __name__ == '__main__':  # Main function
     model = LstmModel()  # Create the model
 
     # To train or to validate
-    if ARGS['train']:
-        model.train(X_TRAIN, Y_TRAIN, NUM_BATCHES)
-    elif ARGS['validate']:
-        model.validate(X_TEST, Y_TEST, NUM_BATCHES)
+
+    model.train(X_TRAIN, Y_TRAIN, NUM_BATCHES)
+    model.validate(X_TEST, Y_TEST, NUM_BATCHES)
