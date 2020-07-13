@@ -136,6 +136,10 @@ class RRUCell(LayerRNNCell):
             "W/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
             initializer=self._bias_initializer)
+        self._W_mul = self.add_variable(
+            "W_smul/%s"% _BIAS_VARIABLE_NAME,
+            shape=[1],
+            initializer=tf.zeros_initializer())
 
         self.built = True
 
@@ -151,25 +155,26 @@ class RRUCell(LayerRNNCell):
         # Go through first, Z transformation
         after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
 
-        group_size = self._group_size
-        # Do normalization
-        if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
-            # Do instance normalization
-            after_norm = instance_norm(after_z)
-        else:
-            # Do group normalization
-            after_norm = group_norm(after_z, group_size)
+        # group_size = self._group_size
+        # # Do normalization
+        # if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
+        #     # Do instance normalization
+        #     after_norm = instance_norm(after_z)
+        # else:
+        #     # Do group normalization
+        #     after_norm = group_norm(after_z, group_size)
 
         # after_norm = instance_norm(after_z)  # If you can't get upper part working
 
         # Do GELU activation
-        after_gelu = gelu(after_norm)
+        after_gelu = gelu(after_z)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
 
         # Merge upper and lower parts
-        final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
+        #final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
+        final = state + after_w*self._W_mul#*np.sqrt(1.0/200)
 
         return final, final
 

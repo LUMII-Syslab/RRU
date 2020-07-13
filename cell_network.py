@@ -67,6 +67,11 @@ class LstmModel:
             # cell = GRUCell(hidden_units)
             cell = RRUCell(hidden_units, group_size=group_size, dropout_rate = output_drop_prob)
 
+            # cells = []
+            # for i in range(2):
+            #     cell = RRUCell(hidden_units, group_size=group_size, dropout_rate = output_drop_prob, name=str(i))
+            #     cells.append(cell)
+            # cell = tf.contrib.rnn.MultiRNNCell(cells)
             # Extract the batch size - this allows for variable batch size
             current_batch_size = tf.shape(x)[0]
 
@@ -82,11 +87,18 @@ class LstmModel:
                                              initial_state=initial_state,
                                              dtype=tf.float32,
                                              sequence_length=sequence_length)
-
+            # value, state = tf.compat.v1.nn.bidirectional_dynamic_rnn(
+            #     RRUCell(hidden_units, group_size=group_size, dropout_rate = output_drop_prob),
+            #     RRUCell(hidden_units, group_size=group_size, dropout_rate = output_drop_prob, name="cb"),
+            #     embed_lookup,
+            #     sequence_length=sequence_length,
+            #     dtype=tf.float32)
+            #
+            # state = state[0]*0.1+state[1]
             # Instantiate weights
             weight = tf.get_variable("weight", [hidden_units, num_classes])
             # Instantiate biases
-            bias = tf.Variable(tf.constant(0.1, shape=[num_classes]))
+            bias = tf.Variable(tf.constant(0.0, shape=[num_classes]))
 
             '''Non-variable sequence length dynamic.rnn'''
             # value = tf.transpose(value, [1, 0, 2])  # After this it's max_time, batch_size, hidden_units
@@ -235,7 +247,7 @@ if __name__ == '__main__':  # Main function
 
     # Load or dataset
     # X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, WORD_TO_ID, ID_TO_WORD, T, max_sequence_length = load_data_tdfs(vocabulary_size)
-    X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, max_sequence_length = load_data_tf(vocabulary_size)
+    X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, max_sequence_length = load_data_tf(vocabulary_size, 20000)
 
     NUM_BATCHES = len(X_TRAIN) // batch_size
 

@@ -78,11 +78,12 @@ def load_data_tdfs(vocabulary_size):  # Duplicated code, but I didn't want to ch
     return x_train, y_train, x_test, y_test, word_to_index, index_to_word, t, max_words
 
 
-def load_data_tf(num_words):
+def load_data_tf(num_words, trim_length):
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.imdb.load_data(num_words=num_words)
 
     # Get the longest sequence length
     maxlen = len(max((x_train + x_test), key=len))
+    maxlen = min(maxlen, trim_length)
 
     x_train = sequence.pad_sequences(x_train, maxlen=maxlen, padding='post')
     x_test = sequence.pad_sequences(x_test, maxlen=maxlen, padding='post')
