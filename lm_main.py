@@ -10,16 +10,16 @@ from RRUCell import RRUCell
 
 # Hyperparameters
 data_set_name = "enwik8"  # "enwik8", "text8", "pennchar", "penn"
-# I will load the bottom two from pickle files. Changing these here won't do a thing.
+# I will load the bottom three from pickle files. Changing these here won't do a thing
 vocabulary_size = None  # 207 is the max for enwik8. 29 is the max for text8. Both numbers include 2 for unk and pad.
-window_size = None  # I used 10 for all
+window_size = None  # I used 10 for all, atm
 step_size = None
 batch_size = 64
 num_epochs = 10
 hidden_units = 1024
 embedding_size = 256
 learning_rate = 0.001
-output_keep_prob = 0.9  # 0.85. For now we disable dropout like this, but we can delete the code later as well
+output_keep_prob = 0.9  # 0.85
 ckpt_path = 'ckpt/'
 log_path = 'logdir/'
 # model_name = 'lstm_model'
@@ -37,7 +37,7 @@ class RNN_LM_Model:
 
             # Batch size list of integer sequences
             x = tf.placeholder(tf.int32, shape=[None, window_size], name="x")
-            # OnehLabels for word prediction
+            # One-hot labels for word prediction
             y = tf.placeholder(tf.int32, shape=[None, vocabulary_size], name="y")
             # Batch size list of sequence lengths, so we can get variable sequence length rnn
             sequence_length = tf.placeholder(tf.int32, [None], name="sequence_length")
@@ -91,14 +91,9 @@ class RNN_LM_Model:
 
             prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
 
-            # correct_prediction = tf.equal(tf.argmax(prediction, axis=1), y)
-            # TypeError: Input 'y' of 'Equal' Op has type float32 that does not match type int64 of argument 'x'.
             correct_prediction = tf.equal(tf.argmax(prediction, axis=1), tf.argmax(y, axis=1))
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
             tf.summary.scalar("accuracy", accuracy)
-
-            # Choice our model made
-            choice = tf.argmax(prediction, axis=1)
 
             # Calculate the loss given prediction and labels
 
@@ -112,7 +107,6 @@ class RNN_LM_Model:
             tf.summary.scalar("perplexity", perplexity)
 
             # Declare our optimizer, we have to check which one works better.
-            # Before: Adam gave better training accuracy and loss, but RMSProp gave better validation accuracy and loss
             optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
             # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
@@ -127,7 +121,6 @@ class RNN_LM_Model:
             self.accuracy = accuracy
             self.prediction = prediction
             self.correct_prediction = correct_prediction
-            self.choice = choice
 
         # Build graph
         print("\nBuilding Graph...\n")
@@ -232,9 +225,9 @@ class RNN_LM_Model:
                 print("Final validation stats. Loss:", total_loss, "Accuracy:", total_accuracy)
 
 
-def one_hot_encode(labels, vocabulary_size):
+def one_hot_encode(labels, vocab_size):
     n_labels = len(labels)
-    n_unique_labels = vocabulary_size  # len(np.unique(labels))
+    n_unique_labels = vocab_size  # len(np.unique(labels))
     one_hot_encoded = np.zeros((n_labels, n_unique_labels))  # Now it's [0 0] [0 0]
     one_hot_encoded[np.arange(n_labels), labels] = 1  # Now it's [1 0] [0 1]
     return one_hot_encoded
@@ -244,8 +237,9 @@ if __name__ == '__main__':  # Main function
     # Load data set
     print("Started loading data...")
     X_TRAIN, Y_TRAIN, X_VALID, Y_VALID, X_TEST, Y_TEST, vocabulary_size, window_size, step_size = load_data("enwik8")
-    print("Data loaded sucessfully...")
 
+    # Do we have to? Or is there a way not to do this?
+    print("One-hot encoding the data")
     Y_TRAIN = one_hot_encode(Y_TRAIN, vocabulary_size)
     Y_VALID = one_hot_encode(Y_VALID, vocabulary_size)
     Y_TEST = one_hot_encode(Y_TEST, vocabulary_size)
