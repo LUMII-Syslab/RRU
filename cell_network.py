@@ -15,7 +15,6 @@ from data_processor import get_sequence_lengths
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 from RRUCell import RRUCell
-from RRUCell import instance_norm
 
 # Hyperparameters
 vocabulary_size = 10000  # 88583 for tfds is the max. 24902 for tf.keras is the max
@@ -33,10 +32,10 @@ log_path = 'logdir/'
 # model_name = 'lstm_model'
 # model_name = 'gru_model'
 model_name = 'rru_model'
-output_path = log_path + model_name + '/h128e10groupNonetestertester'
+output_path = log_path + model_name + '/final_nonlinearity'
 
 
-class LstmModel:
+class RnnModel:
 
     def __init__(self):
 
@@ -63,9 +62,9 @@ class LstmModel:
             embed_lookup = tf.nn.embedding_lookup(embedding, x)
 
             # Create LSTM/GRU/RRU Cell
-            # cell = BasicLSTMCell(hidden_units)
+            # cell = BasicLSTMCell(hidden_units, state_is_tuple=True)
             # cell = GRUCell(hidden_units)
-            cell = RRUCell(hidden_units, group_size=group_size, dropout_rate = output_drop_prob)
+            cell = RRUCell(hidden_units, group_size=group_size, dropout_rate=output_drop_prob)
 
             # cells = []
             # for i in range(2):
@@ -82,6 +81,7 @@ class LstmModel:
             # cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
 
             # Value will have all the outputs, we will need just the last. _ contains hidden states between the steps
+            # value, (_, state) = tf.nn.dynamic_rnn(cell,  # BasicLSTMCell needs this
             value, state = tf.nn.dynamic_rnn(cell,
                                              embed_lookup,
                                              initial_state=initial_state,
@@ -142,6 +142,13 @@ class LstmModel:
             self.prediction = prediction
             self.correct_prediction = correct_prediction
             self.choice = choice
+
+            tvars = tf.trainable_variables()
+            print(tvars)
+            vsum = 0
+            for v in tvars:
+                vsum += np.product(v.get_shape().as_list())
+            print("learnable parameters:", vsum / 1024 / 1024, 'M', flush=True)
 
         # Build graph
         print("\nBuilding Graph...\n")
@@ -251,9 +258,8 @@ if __name__ == '__main__':  # Main function
 
     NUM_BATCHES = len(X_TRAIN) // batch_size
 
-    model = LstmModel()  # Create the model
-
-    # To train or to validate
+    model = RnnModel()  # Create the model
 
     model.train(X_TRAIN, Y_TRAIN, NUM_BATCHES)
+
     model.validate(X_TEST, Y_TEST, NUM_BATCHES)
