@@ -12,12 +12,35 @@ Run LSTM_with_tf_scan.py
 
 ### Language modeling
 
+##### Newest way
+
 1 - To get the data, you must run lm_get_data.sh
 
 If you are on Windows, it might be a little tricky and not work, in that case you can use WSL, etc.:
 ```
-cd '/mnt/c/Users/YOUR PATH/rnn-lm-tensorflow'
-bash get_data.sh
+cd '/mnt/c/Users/YOUR PATH/RRU'
+bash lm_get_data.sh
+```
+	
+When I added these files to git, it threw message "warning: LF will be replaced by CRLF in get_data.sh.
+", so I hope that it still works.
+
+2 - To prepare the data, you must run lm_efficient_utils.py
+
+You can change vocabulary_size for it in main function, then you have to run it, for it to save it.
+
+3 - To start training/validation/testing, run lm_efficient_main.py
+
+Change hyperparameters inside to run different data sets, possiblites atm: enwik8, text8, penn, pennchar, defaultly picks enwik8
+
+##### Old way
+
+1 - To get the data, you must run lm_get_data.sh
+
+If you are on Windows, it might be a little tricky and not work, in that case you can use WSL, etc.:
+```
+cd '/mnt/c/Users/YOUR PATH/RRU'
+bash lm_get_data.sh
 ```
 	
 When I added these files to git, it threw message "warning: LF will be replaced by CRLF in get_data.sh.
