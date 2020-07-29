@@ -1,19 +1,21 @@
 import tensorflow as tf
-import numpy as np
 
 from sklearn.utils import shuffle
 
-from lm_utils import load_data
-from lm_utils import get_sequence_lengths
+from lm_efficient_utils import load_data
+from lm_efficient_utils import get_sequence_lengths
+from lm_efficient_utils import get_window_indexes
+from lm_efficient_utils import get_input_data_from_indexes
+from lm_efficient_utils import one_hot_encode
 
 from RRUCell import RRUCell
 
 # Hyperparameters
 data_set_name = "enwik8"  # "enwik8", "text8", "pennchar", "penn"
 # I will load the bottom three from pickle files. Changing these here won't do a thing
-vocabulary_size = None  # 207 is the max for enwik8. 29 is the max for text8. Both numbers include 2 for unk and pad.
-window_size = None  # I used 10 for all, atm
-step_size = None
+vocabulary_size = None  # I will load this from a pickle file, so changing this here won't do a thing
+window_size = 128
+step_size = 1
 batch_size = 64
 num_epochs = 10
 hidden_units = 1024
@@ -127,7 +129,7 @@ class RNN_LM_Model:
         __graph__()
         print("\nGraph Built...\n")
 
-    def fit(self, x_train, y_train, num_batches_train, x_valid, y_valid, num_batches_valid):
+    def fit(self, train_data, valid_data):
         with tf.Session() as sess:
             ''' ### TRAIN ### '''
             print("Starting training...")
@@ -138,22 +140,26 @@ class RNN_LM_Model:
             train_writer = tf.summary.FileWriter(output_path)
             train_writer.add_graph(sess.graph)
 
+            indexes = get_window_indexes(len(train_data), window_size, step_size)
+
             for epoch in range(num_epochs):
                 print("------ Epoch", epoch + 1, "out of", num_epochs, "------")
-                if epoch > 0:
-                    data = list(zip(x_train, y_train))
-                    shuffle(data)
-                    x_train, y_train = zip(*data)
+
+                indexes = shuffle(indexes)
+
+                num_batches = len(indexes) // batch_size
 
                 total_loss = 0
                 total_accuracy = 0
-                for i in range(num_batches_train):
-                    if i != num_batches_train - 1:
-                        x_batch = x_train[i * batch_size: i * batch_size + batch_size]
-                        y_batch = y_train[i * batch_size: i * batch_size + batch_size]
+
+                for i in range(num_batches):
+                    if i != num_batches - 1:
+                        x_batch = indexes[i * batch_size: i * batch_size + batch_size]
                     else:
-                        x_batch = x_train[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
-                        y_batch = y_train[i * batch_size:]
+                        x_batch = indexes[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
+                    # Now we have batch of integers to look in text from
+                    x_batch, y_batch = get_input_data_from_indexes(train_data, x_batch, window_size)
+                    y_batch = one_hot_encode(y_batch, vocabulary_size)
                     sequence_lengths = get_sequence_lengths(x_batch)
 
                     s, _, l, p, a = sess.run([merged_summary, self.optimizer, self.loss, self.perplexity, self.accuracy],
@@ -162,7 +168,7 @@ class RNN_LM_Model:
                                              self.sequence_length: sequence_lengths,
                                              self.output_drop_prob: 1 - output_keep_prob})
 
-                    train_writer.add_summary(s, i + epoch * num_batches_train)
+                    train_writer.add_summary(s, i + epoch * num_batches)
                     total_loss += l
                     if i == 0:
                         total_accuracy = a
@@ -170,18 +176,18 @@ class RNN_LM_Model:
                         total_accuracy = (total_accuracy * i + a) / (i + 1)
 
                     if i > 0 and i % 100 == 0:
-                        print("STEP", i, "of", num_batches_train, "LOSS:", l, "PERPLEXITY:", p, "ACC:", a)
+                        print("STEP", i, "of", num_batches, "LOSS:", l, "PERPLEXITY:", p, "ACC:", a)
 
                 print("   Epoch", epoch + 1, ": accuracy - ", total_accuracy, ": loss - ", total_loss)
 
                 ''' ### VALIDATE ### '''
-                self.test_or_validate(x_valid, y_valid, num_batches_valid)
+                self.test_or_validate(valid_data)
             # Training ends here
             # Save checkpoint
             saver = tf.compat.v1.train.Saver()
             saver.save(sess, ckpt_path + model_name + ".ckpt", global_step=i)
 
-    def test_or_validate(self, x, y, num_batches, testing=False):
+    def test_or_validate(self, data, testing=False):
         with tf.Session() as sess:
             if testing:
                 print("Starting testing...")
@@ -190,6 +196,8 @@ class RNN_LM_Model:
 
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
+            indexes = get_window_indexes(len(data), window_size, step_size)
+
             # Restore session
             ckpt = tf.train.get_checkpoint_state(ckpt_path)
             saver = tf.compat.v1.train.Saver()
@@ -197,15 +205,18 @@ class RNN_LM_Model:
             if ckpt and ckpt.model_checkpoint_path:
                 saver.restore(sess, ckpt.model_checkpoint_path)
 
+            num_batches = len(indexes) // batch_size
+
             total_loss = 0
             total_accuracy = 0
             for i in range(num_batches):
                 if i != num_batches - 1:
-                    x_batch = x[i * batch_size: i * batch_size + batch_size]
-                    y_batch = y[i * batch_size: i * batch_size + batch_size]
+                    x_batch = indexes[i * batch_size: i * batch_size + batch_size]
                 else:
-                    x_batch = x[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
-                    y_batch = y[i * batch_size:]
+                    x_batch = indexes[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
+                # Now we have batch of integers to look in text from
+                x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
+                y_batch = one_hot_encode(y_batch, vocabulary_size)
                 sequence_lengths = get_sequence_lengths(x_batch)
 
                 l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch,
@@ -225,32 +236,13 @@ class RNN_LM_Model:
                 print("Final validation stats. Loss:", total_loss, "Accuracy:", total_accuracy)
 
 
-def one_hot_encode(labels, vocab_size):
-    n_labels = len(labels)
-    n_unique_labels = vocab_size  # len(np.unique(labels))
-    one_hot_encoded = np.zeros((n_labels, n_unique_labels))  # Now it's [0 0] [0 0]
-    one_hot_encoded[np.arange(n_labels), labels] = 1  # Now it's [1 0] [0 1]
-    return one_hot_encoded
-
-
 if __name__ == '__main__':  # Main function
     # Load data set
     print("Started loading data...")
-    X_TRAIN, Y_TRAIN, X_VALID, Y_VALID, X_TEST, Y_TEST, vocabulary_size, window_size, step_size = load_data("enwik8")
-
-    # Do we have to? Or is there a way not to do this?
-    print("One-hot encoding the data")
-    Y_TRAIN = one_hot_encode(Y_TRAIN, vocabulary_size)
-    Y_VALID = one_hot_encode(Y_VALID, vocabulary_size)
-    Y_TEST = one_hot_encode(Y_TEST, vocabulary_size)
-
-    # Getting amount of full batches
-    NUM_BATCHES_TRAIN = len(X_TRAIN) // batch_size
-    NUM_BATCHES_VALID = len(X_VALID) // batch_size
-    NUM_BATCHES_TEST = len(X_TEST) // batch_size
+    TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)
 
     model = RNN_LM_Model()  # Create the model
 
-    model.fit(X_TRAIN, Y_TRAIN, NUM_BATCHES_TRAIN, X_VALID, Y_VALID, NUM_BATCHES_VALID)
+    model.fit(TRAIN_DATA, VALID_DATA)
 
-    model.test_or_validate(X_TEST, Y_TEST, NUM_BATCHES_TEST, testing=True)
+    model.test_or_validate(TEST_DATA, testing=True)
