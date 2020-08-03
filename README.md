@@ -1,18 +1,18 @@
 # RRU comparison versus GRU and LSTM
 
-### IMDB Sentiment Analysis
+## IMDB Sentiment Analysis
 
-##### Newest way
+#### Newest way
 
 Run cell_network.py
 
-##### Old way
+#### Old way
 
 Run LSTM_with_tf_scan.py
 
-### Language modeling
+## Language modeling
 
-##### Newest way
+#### Newest way
 
 1 - To get the data, you must run lm_get_data.sh
 
@@ -33,7 +33,7 @@ You can change vocabulary_size for it in main function, then you have to run it,
 
 Change hyperparameters inside to run different data sets, possiblites atm: enwik8, text8, penn, pennchar, defaultly picks enwik8
 
-##### Old way
+#### Old way
 
 1 - To get the data, you must run lm_get_data.sh
 

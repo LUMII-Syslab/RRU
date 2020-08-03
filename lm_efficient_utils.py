@@ -157,15 +157,6 @@ def load_data(name):
     return train_data, valid_data, test_data, vocabulary_size
 
 
-def get_sequence_lengths(x):  # Full sequence length minus the padded zeros
-    sequence_lengths = []
-    for sequence in x:
-        sequence = np.array(sequence)  # Without this line it returns full length for casual lists [1,1,1,0,0]->5
-        sequence_length = len(sequence) - np.count_nonzero(sequence == 0)  # Count of non-padded symbols
-        sequence_lengths.append(sequence_length)
-    return sequence_lengths
-
-
 def one_hot_encode(labels, vocab_size):
     n_labels = len(labels)
     n_unique_labels = vocab_size  # len(np.unique(labels))
@@ -187,7 +178,7 @@ def get_input_data_from_indexes(data, indexes, window_size):
     targets = []
     for i in indexes:
         sequences.append(data[i:i + window_size])
-        targets.append(data[i + window_size])
+        targets.append(data[i + 1:i + window_size + 1])
 
     return sequences, targets
 
