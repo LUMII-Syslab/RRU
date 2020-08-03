@@ -34,10 +34,6 @@ _WEIGHTS_VARIABLE_NAME = "kernel"
 def inv_sigmoid(y):
     return np.log(y / (1 - y))
 
-def ssqrt(x):
-    """Signed sqrt"""
-    return x * tf.rsqrt(1 + 1*tf.abs(x))
-
 
 residual_weight = 0.95  # r
 candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
@@ -153,7 +149,7 @@ class RRUCell(LayerRNNCell):
 
         # LOWER PART OF THE CELL
         # Concatenate input and last state
-        state_drop = tf.nn.dropout(ssqrt(state), rate = self._dropout_rate)
+        state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
         input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
 
         # Go through first, Z transformation
@@ -168,10 +164,10 @@ class RRUCell(LayerRNNCell):
         #     # Do group normalization
         #     after_norm = group_norm(after_z, group_size)
 
-        # after_norm = instance_norm(after_z)  # If you can't get upper part working
+        after_norm = instance_norm(after_z)  # If you can't get upper part working
 
         # Do GELU activation
-        after_gelu = gelu(after_z)
+        after_gelu = gelu(after_norm)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias

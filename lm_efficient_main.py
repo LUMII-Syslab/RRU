@@ -14,13 +14,13 @@ from RRUCell import RRUCell
 data_set_name = "enwik8"  # "enwik8", "text8", "pennchar", "penn"
 # I will load the bottom three from pickle files. Changing these here won't do a thing
 vocabulary_size = None  # I will load this from a pickle file, so changing this here won't do a thing
-window_size = 256  # 16 384 worked, but never increased accuracy
+window_size = 256
 step_size = window_size // 2
 batch_size = 1
 num_epochs = 1
 hidden_units = 1500
 embedding_size = 256
-learning_rate = 0.01
+learning_rate = 0.001
 output_keep_prob = 0.9  # 0.85
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
