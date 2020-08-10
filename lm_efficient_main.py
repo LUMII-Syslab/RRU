@@ -1,27 +1,28 @@
 import tensorflow as tf
 import numpy as np
+import time
 
 from sklearn.utils import shuffle
 
 from lm_efficient_utils import load_data
 from lm_efficient_utils import get_window_indexes
 from lm_efficient_utils import get_input_data_from_indexes
-from lm_efficient_utils import one_hot_encode
 
+from BasicLSTMCell import BasicLSTMCell
+from GRUCell import GRUCell
 from RRUCell import RRUCell
 
 # Hyperparameters
 data_set_name = "enwik8"  # "enwik8", "text8", "pennchar", "penn"
-# I will load the bottom three from pickle files. Changing these here won't do a thing
 vocabulary_size = None  # I will load this from a pickle file, so changing this here won't do a thing
 window_size = 256
 step_size = window_size // 2
-batch_size = 1
-num_epochs = 1
+batch_size = 4  # 1
+num_epochs = 3
 hidden_units = 1500
 embedding_size = 256
 learning_rate = 0.001
-output_keep_prob = 0.9  # 0.85
+output_keep_prob = 0.9
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
 # model_name = 'lstm_model'
@@ -39,13 +40,12 @@ class RNN_LM_Model:
 
             # Batch size list of integer sequences
             x = tf.placeholder(tf.int32, shape=[None, window_size], name="x")
-            # One-hot labels for word prediction
-            y = tf.placeholder(tf.int32, shape=[None, window_size, vocabulary_size], name="y")
-            # Output drop probability so we can pass different values depending on training/ testing
-            output_drop_prob = tf.placeholder(tf.float32, name='output_drop_prob')
 
-            # Cast our label to float32. Later it will be better when it does some math (?)
-            y = tf.cast(y, tf.float32)
+            # Labels for word prediction
+            y = tf.placeholder(tf.int64, shape=[None, window_size], name="y")
+
+            # Output drop probability so we can pass different values depending on training / testing
+            output_drop_prob = tf.placeholder(tf.float32, name='output_drop_prob')
 
             # Instantiate our embedding matrix
             embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0),
@@ -55,8 +55,8 @@ class RNN_LM_Model:
             embed_lookup = tf.nn.embedding_lookup(embedding, x)
 
             # Create LSTM/GRU/RRU Cell
-            # cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_units, state_is_tuple=True)
-            # cell = tf.nn.rnn_cell.GRUCell(hidden_units)
+            # cell = BasicLSTMCell(hidden_units)
+            # cell = GRUCell(hidden_units)
             cell = RRUCell(hidden_units, dropout_rate=output_drop_prob)
 
             # Extract the batch size - this allows for variable batch size
@@ -68,8 +68,7 @@ class RNN_LM_Model:
             # Wrap our cell in a dropout wrapper
             # cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
 
-            # Value will have all the outputs, we will need just the last. _ contains hidden states between the steps
-            # value, (_, state) = tf.nn.dynamic_rnn(cell,  # BasicLSTMCell needs this
+            # Value will have all the outputs. State contains hidden states between the steps.
             value, state = tf.nn.dynamic_rnn(cell,
                                              embed_lookup,
                                              initial_state=initial_state,
@@ -80,28 +79,21 @@ class RNN_LM_Model:
             # Instantiate biases
             bias = tf.Variable(tf.constant(0.0, shape=[vocabulary_size]))
 
-            '''Non-variable sequence length dynamic.rnn'''
-            # value = tf.transpose(value, [1, 0, 2])  # After this it's max_time, batch_size, hidden_units
-            # last = value[-1]  # Extract last output. Should be batch_size hidden_units
-
-            # last = tf.nn.dropout(last, rate=output_drop_prob)
-
             # [batch_size, max_time, hidden_units] -> [batch_size x max_time, hidden_units]
             last = tf.reshape(value, shape=(-1, hidden_units))
-            # [batch_size, window_size, vocabulary_size] -> [batch_size x window_size, vocab_size]
-            labels = tf.reshape(y, shape=(-1, vocabulary_size))
+
+            # [batch_size, window_size] -> [batch_size x window_size]
+            labels = tf.reshape(y, [-1])
 
             # Final form should be [batch_size x max_time, vocabulary_size]
             prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
 
-            correct_prediction = tf.equal(tf.argmax(prediction, axis=1), tf.argmax(labels, axis=1))
+            correct_prediction = tf.equal(tf.argmax(prediction, axis=1), labels)
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
             tf.summary.scalar("accuracy", accuracy)
 
             # Calculate the loss given prediction and labels
-
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=prediction,
-                                                                             labels=labels))
+            loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=labels))
 
             tf.summary.scalar("loss", loss)
 
@@ -136,10 +128,9 @@ class RNN_LM_Model:
         __graph__()
         print("\nGraph Built...\n")
 
-    def fit(self, train_data, valid_data):
+    def fit(self, train_data, valid_data=None):
         with tf.Session() as sess:
-            ''' ### TRAIN ### '''
-            print("Starting training...")
+            print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
             # Adding a writer so we can visualize accuracy and loss on TensorBoard
@@ -149,15 +140,18 @@ class RNN_LM_Model:
 
             indexes = get_window_indexes(len(train_data), window_size, step_size)
 
+            num_batches = len(indexes) // batch_size
+
             for epoch in range(num_epochs):
-                print("------ Epoch", epoch + 1, "out of", num_epochs, "------")
+                print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
 
                 indexes = shuffle(indexes)
 
-                num_batches = len(indexes) // batch_size
-
                 total_loss = 0
                 total_accuracy = 0
+                total_bpc = 0
+
+                start_time = time.time()
 
                 for i in range(num_batches):
                     if i != num_batches - 1:
@@ -166,9 +160,6 @@ class RNN_LM_Model:
                         x_batch = indexes[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
                     # Now we have batch of integers to look in text from
                     x_batch, y_batch = get_input_data_from_indexes(train_data, x_batch, window_size)
-                    for j in range(len(y_batch)):
-                        y_batch[j] = one_hot_encode(y_batch[j], vocabulary_size)
-                    # y_batch = one_hot_encode(y_batch, vocabulary_size)
 
                     s, _, l, b, a = sess.run([merged_summary, self.optimizer, self.loss, self.bpc, self.accuracy],
                                              feed_dict={self.x: x_batch,
@@ -179,31 +170,65 @@ class RNN_LM_Model:
                     total_loss += l
                     if i == 0:
                         total_accuracy = a
+                        total_bpc = b
                     else:
                         total_accuracy = (total_accuracy * i + a) / (i + 1)
+                        total_bpc = (total_bpc * i + b) / (i + 1)
 
-                    if i > 0 and i % 100 == 0:
-                        print("STEP", i, "of", num_batches, "LOSS:", l, "BPC:", b, "ACC:", a)
+                    if i > 0 and (i % 99 == 0 or i == num_batches - 1):
+                        print(f"Step {i + 1} of {num_batches} | Loss: {l}, BPC: {b}, Accuracy: {a}, TimeFromStart: {time.time() - start_time}")
 
-                print("   Epoch", epoch + 1, ": accuracy - ", total_accuracy, ": loss - ", total_loss)
+                print(f"   Epoch {epoch + 1} | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
-                ''' ### VALIDATE ### '''
-                self.test_or_validate(valid_data)
+                if valid_data is not None:
+                    print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
+
+                    # I think we need to validate and test with step_size = step_size, right? maybe 1
+                    validation_indexes = get_window_indexes(len(valid_data), window_size, step_size)
+
+                    num_validation_batches = len(validation_indexes) // batch_size
+
+                    total_loss = 0
+                    total_accuracy = 0
+                    total_bpc = 0
+
+                    start_time = time.time()
+
+                    for i in range(num_validation_batches):
+                        if i != num_validation_batches - 1:
+                            x_batch = validation_indexes[i * batch_size: i * batch_size + batch_size]
+                        else:
+                            x_batch = validation_indexes[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
+                        # Now we have batch of integers to look in text from
+                        x_batch, y_batch = get_input_data_from_indexes(valid_data, x_batch, window_size)
+
+                        l, b, a = sess.run([self.loss, self.bpc, self.accuracy], feed_dict={self.x: x_batch,
+                                                                                            self.y: y_batch,
+                                                                                            self.output_drop_prob: 0.})
+                        total_loss += l
+                        if i == 0:
+                            total_accuracy = a
+                            total_bpc = b
+                        else:
+                            total_accuracy = (total_accuracy * i + a) / (i + 1)
+                            total_bpc = (total_bpc * i + b) / (i + 1)
+
+                        if i > 0 and (i % 99 == 0 or i == num_validation_batches - 1):
+                            print(f"Step {i + 1} of {num_validation_batches} | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
+                    print(f"Final validation stats | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
+
             # Training ends here
             # Save checkpoint
             saver = tf.compat.v1.train.Saver()
             saver.save(sess, ckpt_path + model_name + ".ckpt", global_step=i)
 
-    def test_or_validate(self, data, testing=False):
+    def evaluate(self, data):
         with tf.Session() as sess:
-            if testing:
-                print("Starting testing...")
-            else:
-                print("Starting validation...")
+            print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
 
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-            # I think we need to validate and test with step_size = step_size, right? maybe 1
+            # I think we need to test with step_size = step_size, right? Not 1
             indexes = get_window_indexes(len(data), window_size, step_size)
 
             # Restore session
@@ -217,6 +242,10 @@ class RNN_LM_Model:
 
             total_loss = 0
             total_accuracy = 0
+            total_bpc = 0
+
+            start_time = time.time()
+
             for i in range(num_batches):
                 if i != num_batches - 1:
                     x_batch = indexes[i * batch_size: i * batch_size + batch_size]
@@ -224,33 +253,35 @@ class RNN_LM_Model:
                     x_batch = indexes[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
                 # Now we have batch of integers to look in text from
                 x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
-                for j in range(len(y_batch)):
-                    y_batch[j] = one_hot_encode(y_batch[j], vocabulary_size)
-                # y_batch = one_hot_encode(y_batch, vocabulary_size)
 
                 l, b, a = sess.run([self.loss, self.bpc, self.accuracy], feed_dict={self.x: x_batch,
-                                                                       self.y: y_batch,
-                                                                       self.output_drop_prob: 0.})
+                                                                                    self.y: y_batch,
+                                                                                    self.output_drop_prob: 0.})
                 total_loss += l
                 if i == 0:
                     total_accuracy = a
+                    total_bpc = b
                 else:
                     total_accuracy = (total_accuracy * i + a) / (i + 1)
-                if i > 0 and i % 100 == 0:
-                    print("Step", i, "of", num_batches, "Loss:", total_loss, "BPC:", b, "Accuracy:", total_accuracy)
-            if testing:
-                print("Final testing stats. Loss:", total_loss, "Accuracy:", total_accuracy)
-            else:
-                print("Final validation stats. Loss:", total_loss, "Accuracy:", total_accuracy)
+                    total_bpc = (total_bpc * i + b) / (i + 1)
+
+                if i > 0 and (i % 99 == 0 or i == num_batches - 1):
+                    print(f"Step {i + 1} of {num_batches} | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
+            print(f"Final testing stats | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
 
 if __name__ == '__main__':  # Main function
-    # Load data set
-    print("Started loading data...")
-    TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)
+    TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
+
+    # To see how it trains in small amounts
+    '''
+    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 900]
+    VALID_DATA = VALID_DATA[:len(VALID_DATA) // 50]
+    TEST_DATA = TEST_DATA[:len(TEST_DATA) // 50]
+    '''
 
     model = RNN_LM_Model()  # Create the model
 
-    model.fit(TRAIN_DATA, VALID_DATA)
+    model.fit(TRAIN_DATA, VALID_DATA)  # Train the model (validating after each epoch)
 
-    model.test_or_validate(TEST_DATA, testing=True)
+    model.evaluate(TEST_DATA)  # Test the model

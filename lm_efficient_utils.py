@@ -145,6 +145,7 @@ def process(raw_text, vocabulary_size):
 
 
 def load_data(name):
+    print("Started loading data...")
     # Check if data set is supported
     list_of_data_sets = ['enwik8', 'text8', 'pennchar', 'penn']
 
