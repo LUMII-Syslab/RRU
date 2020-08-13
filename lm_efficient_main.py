@@ -11,15 +11,17 @@ from lm_efficient_utils import get_input_data_from_indexes
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 from RRUCell import RRUCell
+import os
+#os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1" #jāpārbauda vai ir ātrāk un vai trenējas korekti!
 
 # Hyperparameters
 data_set_name = "enwik8"  # "enwik8", "text8", "pennchar", "penn"
 vocabulary_size = None  # I will load this from a pickle file, so changing this here won't do a thing
-window_size = 256
+window_size = 512
 step_size = window_size // 2
-batch_size = 4  # 1
+batch_size = 64  # 1
 num_epochs = 3
-hidden_units = 1500
+hidden_units = 512*3
 embedding_size = 256
 learning_rate = 0.001
 output_keep_prob = 0.9
@@ -129,7 +131,10 @@ class RNN_LM_Model:
         print("\nGraph Built...\n")
 
     def fit(self, train_data, valid_data=None):
-        with tf.Session() as sess:
+        tf_config = tf.ConfigProto()
+        #tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
+
+        with tf.Session(config=tf_config) as sess:
             print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
