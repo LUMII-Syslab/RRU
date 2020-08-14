@@ -107,7 +107,17 @@ class RNN_LM_Model:
             # Final form should be [batch_size x max_time, vocabulary_size]
             prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
 
+            ''' Last half accuracy predictions '''
+            half = window_size // 2
+            half_last = tf.reshape(value[:, half:, :], shape=(-1, hidden_units))
+            half_prediction = tf.matmul(half_last, weight) + bias
+            half_y = y[:, half:]
+            half_correct_prediction = tf.equal(tf.argmax(half_prediction, axis=1), tf.reshape(half_y, [-1]))
+            half_accuracy = tf.reduce_mean(tf.cast(half_correct_prediction, tf.float32))
+            tf.summary.scalar("half_accuracy", half_accuracy)
+            ''' Full size accuracy predicions '''
             correct_prediction = tf.equal(tf.argmax(prediction, axis=1), labels)
+
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
             tf.summary.scalar("accuracy", accuracy)
 
@@ -160,6 +170,9 @@ class RNN_LM_Model:
             train_writer = tf.summary.FileWriter(output_path)
             train_writer.add_graph(sess.graph)
 
+            validation_writer = tf.summary.FileWriter(output_path + "/validation")
+            validation_writer.add_graph(sess.graph)
+
             indexes = get_window_indexes(len(train_data), window_size, step_size)
 
             num_batches = len(indexes) // batch_size
@@ -197,10 +210,18 @@ class RNN_LM_Model:
                         total_accuracy = (total_accuracy * i + a) / (i + 1)
                         total_bpc = (total_bpc * i + b) / (i + 1)
 
-                    if i > 0 and (i % 99 == 0 or i == num_batches - 1):
+                    if i > 0 and ((i + 1) % 100 == 0 or i == num_batches - 1):
                         print(f"Step {i + 1} of {num_batches} | Loss: {l}, BPC: {b}, Accuracy: {a}, TimeFromStart: {time.time() - start_time}")
 
                 print(f"   Epoch {epoch + 1} | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
+
+                epoch_accuracy_summary = tf.Summary()
+                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=total_accuracy)
+                train_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+
+                epoch_bpc_summary = tf.Summary()
+                epoch_bpc_summary.value.add(tag='epoch_bpc', simple_value=total_bpc)
+                train_writer.add_summary(epoch_bpc_summary, epoch + 1)
 
                 if valid_data is not None:
                     print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
@@ -235,10 +256,17 @@ class RNN_LM_Model:
                             total_accuracy = (total_accuracy * i + a) / (i + 1)
                             total_bpc = (total_bpc * i + b) / (i + 1)
 
-                        if i > 0 and (i % 99 == 0 or i == num_validation_batches - 1):
+                        if i > 0 and ((i + 1) % 100 == 0 or i == num_validation_batches - 1):
                             print(f"Step {i + 1} of {num_validation_batches} | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
                     print(f"Final validation stats | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
+                    epoch_accuracy_summary = tf.Summary()
+                    epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=total_accuracy)
+                    validation_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+
+                    epoch_bpc_summary = tf.Summary()
+                    epoch_bpc_summary.value.add(tag='epoch_bpc', simple_value=total_bpc)
+                    validation_writer.add_summary(epoch_bpc_summary, epoch + 1)
             # Training ends here
             # Save checkpoint
             saver = tf.compat.v1.train.Saver()
@@ -287,7 +315,7 @@ class RNN_LM_Model:
                     total_accuracy = (total_accuracy * i + a) / (i + 1)
                     total_bpc = (total_bpc * i + b) / (i + 1)
 
-                if i > 0 and (i % 99 == 0 or i == num_batches - 1):
+                if i > 0 and ((i + 1) % 100 == 0 or i == num_batches - 1):
                     print(f"Step {i + 1} of {num_batches} | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
             print(f"Final testing stats | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
@@ -297,9 +325,9 @@ if __name__ == '__main__':  # Main function
 
     # To see how it trains in small amounts
     '''
-    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 900]
-    VALID_DATA = VALID_DATA[:len(VALID_DATA) // 50]
-    TEST_DATA = TEST_DATA[:len(TEST_DATA) // 50]
+    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 90]
+    VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]
+    TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
     '''
 
     model = RNN_LM_Model()  # Create the model
