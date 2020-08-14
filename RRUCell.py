@@ -35,9 +35,9 @@ def inv_sigmoid(y):
     return np.log(y / (1 - y))
 
 
-residual_weight = 0.95  # r
-candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
-S_initial_value = inv_sigmoid(residual_weight)
+#residual_weight = 0.95  # r
+#candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
+#S_initial_value = inv_sigmoid(residual_weight)
 
 
 class RRUCell(LayerRNNCell):
@@ -74,6 +74,7 @@ class RRUCell(LayerRNNCell):
                  activation=None,
                  reuse=None,
                  dropout_rate = 0.0,
+                 residual_weight_initial_value = 0.95,  # in range (0 - 1]
                  name=None,
                  dtype=None,
                  **kwargs):
@@ -97,6 +98,8 @@ class RRUCell(LayerRNNCell):
         self._bias_initializer = tf.zeros_initializer()
         self._group_size = group_size
         self._dropout_rate = dropout_rate
+        assert residual_weight_initial_value > 0 and residual_weight_initial_value <= 1
+        self.residual_weight_initial_value = residual_weight_initial_value
 
     @property
     def state_size(self):
@@ -113,24 +116,23 @@ class RRUCell(LayerRNNCell):
         _check_supported_dtypes(self.dtype)
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
+        n_middle_maps = 2 * total # TODO find the optimal value
         self._Z_kernel = self.add_variable(
             "Z/%s" % _WEIGHTS_VARIABLE_NAME,
-            shape=[total, 2 * total],
+            shape=[total, n_middle_maps],
             initializer=self._kernel_initializer)
         self._Z_bias = self.add_variable(
             "Z/%s" % _BIAS_VARIABLE_NAME,
-            shape=[2 * total],
+            shape=[n_middle_maps],
             initializer=self._bias_initializer)
-        self._S_bias = self.add_variable(
+        self.S_bias_variable = self.add_variable(
             "S/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
-            # initializer=self._bias_initializer)  # This worked, but I want to get initial value for s to be inv sigm r
-            initializer=(self._bias_initializer
-                         if self._bias_initializer is not None else
-                         init_ops.constant_initializer(S_initial_value, dtype=self.dtype)))
+            initializer = init_ops.constant_initializer(inv_sigmoid(self.residual_weight_initial_value / 1.5), dtype=self.dtype))
+        self.S_bias = tf.sigmoid(self.S_bias_variable)*1.5
         self._W_kernel = self.add_variable(
             "W/%s" % _WEIGHTS_VARIABLE_NAME,
-            shape=[2 * total, self._num_units],
+            shape=[n_middle_maps, self._num_units],
             initializer=self._kernel_initializer)
         self._W_bias = self.add_variable(
             "W/%s" % _BIAS_VARIABLE_NAME,
@@ -138,8 +140,13 @@ class RRUCell(LayerRNNCell):
             initializer=self._bias_initializer)
         self._W_mul = self.add_variable(
             "W_smul/%s"% _BIAS_VARIABLE_NAME,
-            shape=[1],
+            shape=(),
             initializer=tf.zeros_initializer())
+
+        self.prev_state_weight = self.add_variable( #todo: check if needed
+            "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
+            shape=(),
+            initializer=tf.ones_initializer())
 
         self.built = True
 
@@ -150,7 +157,7 @@ class RRUCell(LayerRNNCell):
         # LOWER PART OF THE CELL
         # Concatenate input and last state
         state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
-        input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
+        input_and_state = array_ops.concat([inputs, state_drop*self.prev_state_weight], 1)  # Inputs are batch_size x depth
 
         # Go through first, Z transformation
         after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
@@ -171,10 +178,11 @@ class RRUCell(LayerRNNCell):
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
+        #after_w -= tf.reduce_mean(after_w, axis=-1, keepdims=True)
 
         # Merge upper and lower parts
         #final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
-        final = state + after_w*self._W_mul#*np.sqrt(1.0/200)
+        final = state * self.S_bias + after_w * self._W_mul#*np.sqrt(1.0/200)
 
         return final, final
 

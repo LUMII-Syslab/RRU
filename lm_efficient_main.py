@@ -11,6 +11,7 @@ from lm_efficient_utils import get_input_data_from_indexes
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 from RRUCell import RRUCell
+from RRUCell import instance_norm
 import os
 #os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1" #jāpārbauda vai ir ātrāk un vai trenējas korekti!
 
@@ -30,7 +31,9 @@ log_path = 'logdir_lm/'
 # model_name = 'lstm_model'
 # model_name = 'gru_model'
 model_name = 'rru_model'
-output_path = log_path + model_name + '/enwik8'
+from datetime import datetime
+current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
+output_path = log_path + model_name + '/enwik8/'+current_time
 
 
 class RNN_LM_Model:
@@ -66,22 +69,36 @@ class RNN_LM_Model:
 
             # Create the initial state of zeros
             initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
+            #initial_state+=np.asarray([1.0, -1.0]*(initial_state.get_shape().as_list()[-1]//2))*0.1
+            #initial_state += 0.1
 
             # Wrap our cell in a dropout wrapper
             # cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
 
             # Value will have all the outputs. State contains hidden states between the steps.
+            #embed_lookup = tf.unstack(embed_lookup, axis=1)
             value, state = tf.nn.dynamic_rnn(cell,
                                              embed_lookup,
                                              initial_state=initial_state,
                                              dtype=tf.float32)
 
             # Instantiate weights
+            gate_img = tf.expand_dims(value[0:1, :, :], -1)
+            #tf.summary.image("mem", gate_img, max_outputs=16)
+            tf.summary.image("mem", tf.transpose(gate_img, [0, 2, 1, 3]), max_outputs=16)
+            tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
+            tf.summary.scalar("stateWeight", cell.prev_state_weight)
+            tf.summary.scalar("W_mul", cell._W_mul)
+
             weight = tf.get_variable("weight", [hidden_units, vocabulary_size])
             # Instantiate biases
             bias = tf.Variable(tf.constant(0.0, shape=[vocabulary_size]))
 
             # [batch_size, max_time, hidden_units] -> [batch_size x max_time, hidden_units]
+            #value = tf.stack(value, axis=1)
+            #value -= tf.reduce_mean(value, [-1], keepdims=True)
+            #value = instance_norm(value)  # If you can't get upper part working
+
             last = tf.reshape(value, shape=(-1, hidden_units))
 
             # [batch_size, window_size] -> [batch_size x window_size]
