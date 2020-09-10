@@ -53,3 +53,51 @@ You can change vocabulary_size, window_size, step_size for it in main function, 
 3 - To start training/validation/testing, run lm_main.py
 
 Change hyperparameters inside to run different data sets, possiblites atm: enwik8, text8, penn, pennchar, defaultly picks enwik8
+
+## Mogrifier LSTM
+
+1 – Install Anaconda
+
+a) Download the installer
+
+```
+wget https://repo.anaconda.com/archive/Anaconda3-2020.07-Linux-x86_64.sh
+```
+
+b) Run the installer
+
+```
+bash Anaconda3-2020.07-Linux-x86_64.sh
+```
+
+c) Refresh the shell, so you can use conda command
+
+```
+source .bashrc
+```
+
+2 - Create a new conda environment and activate it
+
+a) "test_mogrifier" environment with some things installed
+
+```
+conda create -n test_mogrifier python=3.6.9 numpy scipy
+```
+
+b) Activate the environment
+
+```
+conda activate test_mogrifier
+```
+
+3 – Install the remaining requirements
+
+```
+conda install cudatoolkit
+conda install cudnn
+conda install tensorflow-gpu=1.15
+/root/anaconda3/envs/test_mogrifier/bin/pip3 install sklearn
+/root/anaconda3/envs/test_mogrifier/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
+```
+
+4 – Run the experiment

@@ -8,32 +8,38 @@ from lm_efficient_utils import load_data
 from lm_efficient_utils import get_window_indexes
 from lm_efficient_utils import get_input_data_from_indexes
 
+# Trying to import Mogrifier LSTM
+# from tiled_lstm import TiledLSTMCell
+
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
-from RRUCell import RRUCell
+# from RRUCell import RRUCell
+# from GatedRRUCell import RRUCell
+from GatedRRUCell2 import RRUCell
 from RRUCell import instance_norm
 import os
 #os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1" #jāpārbauda vai ir ātrāk un vai trenējas korekti!
 
 # Hyperparameters
-data_set_name = "enwik8"  # "enwik8", "text8", "pennchar", "penn"
+data_set_name = "penn"  # "enwik8", "text8", "pennchar", "penn"
 vocabulary_size = None  # I will load this from a pickle file, so changing this here won't do a thing
-window_size = 512
+window_size = 70  # Enwik8 we put 512, 70 wordpenn? 150 on charpenn?
 step_size = window_size // 2
-batch_size = 64  # 1
-num_epochs = 3
-hidden_units = 512*3
-embedding_size = 256
-learning_rate = 0.001
+batch_size = 64  # enwik8 and pennword 64, 128 charpenn?
+num_epochs = 50
+hidden_units = 256 * 3
+embedding_size = 512  # Did I have 256 for enwik8 ???
+learning_rate = 0.001  # 0.0001
 output_keep_prob = 0.9
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
 # model_name = 'lstm_model'
 # model_name = 'gru_model'
-model_name = 'rru_model'
+model_name = 'grru2_model'
+# model_name = 'mogrifier_lstm_model'
 from datetime import datetime
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-output_path = log_path + model_name + '/enwik8/'+current_time
+output_path = log_path + model_name + '/penn/' + current_time
 
 
 class RNN_LM_Model:
@@ -63,6 +69,7 @@ class RNN_LM_Model:
             # cell = BasicLSTMCell(hidden_units)
             # cell = GRUCell(hidden_units)
             cell = RRUCell(hidden_units, dropout_rate=output_drop_prob)
+            # cell = TiledLSTMCell(hidden_units)
 
             # Extract the batch size - this allows for variable batch size
             current_batch_size = tf.shape(x)[0]
@@ -83,12 +90,12 @@ class RNN_LM_Model:
                                              dtype=tf.float32)
 
             # Instantiate weights
-            gate_img = tf.expand_dims(value[0:1, :, :], -1)
-            #tf.summary.image("mem", gate_img, max_outputs=16)
-            tf.summary.image("mem", tf.transpose(gate_img, [0, 2, 1, 3]), max_outputs=16)
-            tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
-            tf.summary.scalar("stateWeight", cell.prev_state_weight)
-            tf.summary.scalar("W_mul", cell._W_mul)
+            # gate_img = tf.expand_dims(value[0:1, :, :], -1)
+            # tf.summary.image("mem", gate_img, max_outputs=16)
+            # tf.summary.image("mem", tf.transpose(gate_img, [0, 2, 1, 3]), max_outputs=16)
+            # tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
+            # tf.summary.scalar("stateWeight", cell.prev_state_weight)
+            # tf.summary.scalar("W_mul", cell._W_mul)
 
             weight = tf.get_variable("weight", [hidden_units, vocabulary_size])
             # Instantiate biases
@@ -201,7 +208,7 @@ class RNN_LM_Model:
                                              self.y: y_batch,
                                              self.output_drop_prob: 1 - output_keep_prob})
 
-                    train_writer.add_summary(s, i + epoch * num_batches)
+                    # train_writer.add_summary(s, i + epoch * num_batches)
                     total_loss += l
                     if i == 0:
                         total_accuracy = a
