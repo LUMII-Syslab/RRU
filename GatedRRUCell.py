@@ -116,7 +116,7 @@ class RRUCell(LayerRNNCell):
         _check_supported_dtypes(self.dtype)
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
-        n_middle_maps = 2 * total # TODO find the optimal value
+        n_middle_maps = 2 * total  # TODO: find the optimal value
         self._Z_kernel = self.add_variable(
             "Z/%s" % _WEIGHTS_VARIABLE_NAME,
             shape=[total, n_middle_maps],
@@ -143,7 +143,7 @@ class RRUCell(LayerRNNCell):
             shape=(),
             initializer=tf.zeros_initializer())
 
-        self.prev_state_weight = self.add_variable( #todo: check if needed
+        self.prev_state_weight = self.add_variable(  # TODO: check if needed
             "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
             shape=(),
             initializer=tf.ones_initializer())
@@ -156,13 +156,14 @@ class RRUCell(LayerRNNCell):
 
         # LOWER PART OF THE CELL
         # Concatenate input and last state
-        #state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
+        # state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
         state_drop = state
         input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
 
-        # Go through first, Z transformation
+        # Go through first transformation – Z
         after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
 
+        # Do group normalization
         # group_size = self._group_size
         # # Do normalization
         # if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
@@ -172,10 +173,13 @@ class RRUCell(LayerRNNCell):
         #     # Do group normalization
         #     after_norm = group_norm(after_z, group_size)
 
-        after_norm = instance_norm(after_z)  # If you can't get upper part working
+        # Do instance normalization
+        after_norm = instance_norm(after_z)
 
         # Do GELU activation
         after_gelu = gelu(after_norm)
+        # Do ReLU activation
+        # after_gelu = tf.nn.relu(after_norm)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias

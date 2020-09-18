@@ -9,37 +9,39 @@ from lm_efficient_utils import get_window_indexes
 from lm_efficient_utils import get_input_data_from_indexes
 
 # Trying to import Mogrifier LSTM
-# from tiled_lstm import TiledLSTMCell
+from tiled_lstm import TiledLSTMCell
 
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 # from RRUCell import RRUCell
-# from GatedRRUCell import RRUCell
-from GatedRRUCell2 import RRUCell
+from GatedRRUCell import RRUCell
+# from GatedRRUCell2 import RRUCell
 from RRUCell import instance_norm
 import os
 #os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1" #jāpārbauda vai ir ātrāk un vai trenējas korekti!
 
 # Hyperparameters
-data_set_name = "penn"  # "enwik8", "text8", "pennchar", "penn"
+data_set_name = "enwik8"  # "enwik8" | "text8" | "pennchar" | "penn"
 vocabulary_size = None  # I will load this from a pickle file, so changing this here won't do a thing
-window_size = 70  # Enwik8 we put 512, 70 wordpenn? 150 on charpenn?
+window_size = 512  # Enwik8/text8? we put 512, 70 PTB word?, 150 on charpenn??
 step_size = window_size // 2
-batch_size = 64  # enwik8 and pennword 64, 128 charpenn?
-num_epochs = 50
-hidden_units = 256 * 3
-embedding_size = 512  # Did I have 256 for enwik8 ???
-learning_rate = 0.001  # 0.0001
+batch_size = 64  # enwik8 and pennword 64?, 128 charpenn??
+num_epochs = 5
+hidden_units = 256 * 7
+embedding_size = 256
+learning_rate = 0.0005  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005
 output_keep_prob = 0.9
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
 # model_name = 'lstm_model'
-# model_name = 'gru_model'
-model_name = 'grru2_model'
+model_name = 'gru_model'
+# model_name = 'rru_model'
+# model_name = 'grru1_model'
+# model_name = 'grru2_model'
 # model_name = 'mogrifier_lstm_model'
 from datetime import datetime
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-output_path = log_path + model_name + '/penn/' + current_time
+output_path = log_path + model_name + '/enwik8/' + current_time
 
 
 class RNN_LM_Model:
@@ -67,9 +69,9 @@ class RNN_LM_Model:
 
             # Create LSTM/GRU/RRU Cell
             # cell = BasicLSTMCell(hidden_units)
-            # cell = GRUCell(hidden_units)
-            cell = RRUCell(hidden_units, dropout_rate=output_drop_prob)
-            # cell = TiledLSTMCell(hidden_units)
+            cell = GRUCell(hidden_units)
+            # cell = RRUCell(hidden_units, dropout_rate=output_drop_prob)
+            # cell = TiledLSTMCell(hidden_units, feature_mask_rank=79, feature_mask_rounds=6)
 
             # Extract the batch size - this allows for variable batch size
             current_batch_size = tf.shape(x)[0]
@@ -137,6 +139,10 @@ class RNN_LM_Model:
 
             tf.summary.scalar("bpc", bpc)
 
+            perplexity = tf.exp(loss)
+
+            tf.summary.scalar("perplexity", perplexity)
+
             # Declare our optimizer, we have to check which one works better.
             optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
             # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
@@ -146,6 +152,7 @@ class RNN_LM_Model:
             self.y = y
             self.output_drop_prob = output_drop_prob
             self.loss = loss
+            self.perplexity = perplexity
             self.bpc = bpc
             self.optimizer = optimizer
             self.accuracy = accuracy
@@ -192,6 +199,7 @@ class RNN_LM_Model:
                 total_loss = 0
                 total_accuracy = 0
                 total_bpc = 0
+                total_perplexity = 0
 
                 start_time = time.time()
 
@@ -203,7 +211,7 @@ class RNN_LM_Model:
                     # Now we have batch of integers to look in text from
                     x_batch, y_batch = get_input_data_from_indexes(train_data, x_batch, window_size)
 
-                    s, _, l, b, a = sess.run([merged_summary, self.optimizer, self.loss, self.bpc, self.accuracy],
+                    s, _, l, p, b, a = sess.run([merged_summary, self.optimizer, self.loss, self.perplexity, self.bpc, self.accuracy],
                                              feed_dict={self.x: x_batch,
                                              self.y: y_batch,
                                              self.output_drop_prob: 1 - output_keep_prob})
@@ -213,14 +221,16 @@ class RNN_LM_Model:
                     if i == 0:
                         total_accuracy = a
                         total_bpc = b
+                        total_perplexity = p
                     else:
                         total_accuracy = (total_accuracy * i + a) / (i + 1)
                         total_bpc = (total_bpc * i + b) / (i + 1)
+                        total_perplexity = (total_perplexity * i + p) / (i + 1)
 
                     if i > 0 and ((i + 1) % 100 == 0 or i == num_batches - 1):
-                        print(f"Step {i + 1} of {num_batches} | Loss: {l}, BPC: {b}, Accuracy: {a}, TimeFromStart: {time.time() - start_time}")
+                        print(f"Step {i + 1} of {num_batches} | Loss: {l}, Perplexity: {p}, BPC: {b}, Accuracy: {a}, TimeFromStart: {time.time() - start_time}")
 
-                print(f"   Epoch {epoch + 1} | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
+                print(f"   Epoch {epoch + 1} | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
                 epoch_accuracy_summary = tf.Summary()
                 epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=total_accuracy)
@@ -241,6 +251,7 @@ class RNN_LM_Model:
                     total_loss = 0
                     total_accuracy = 0
                     total_bpc = 0
+                    total_perplexity = 0
 
                     start_time = time.time()
 
@@ -252,20 +263,22 @@ class RNN_LM_Model:
                         # Now we have batch of integers to look in text from
                         x_batch, y_batch = get_input_data_from_indexes(valid_data, x_batch, window_size)
 
-                        l, b, a = sess.run([self.loss, self.bpc, self.accuracy], feed_dict={self.x: x_batch,
+                        l, p, b, a = sess.run([self.loss, self.perplexity, self.bpc, self.accuracy], feed_dict={self.x: x_batch,
                                                                                             self.y: y_batch,
                                                                                             self.output_drop_prob: 0.})
                         total_loss += l
                         if i == 0:
                             total_accuracy = a
                             total_bpc = b
+                            total_perplexity  =  p
                         else:
                             total_accuracy = (total_accuracy * i + a) / (i + 1)
                             total_bpc = (total_bpc * i + b) / (i + 1)
+                            total_perplexity = (total_perplexity * i + p) / (i + 1)
 
                         if i > 0 and ((i + 1) % 100 == 0 or i == num_validation_batches - 1):
-                            print(f"Step {i + 1} of {num_validation_batches} | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
-                    print(f"Final validation stats | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
+                            print(f"Step {i + 1} of {num_validation_batches} | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
+                    print(f"Final validation stats | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
                     epoch_accuracy_summary = tf.Summary()
                     epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=total_accuracy)
@@ -300,6 +313,7 @@ class RNN_LM_Model:
             total_loss = 0
             total_accuracy = 0
             total_bpc = 0
+            total_perplexity = 0
 
             start_time = time.time()
 
@@ -311,20 +325,22 @@ class RNN_LM_Model:
                 # Now we have batch of integers to look in text from
                 x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
 
-                l, b, a = sess.run([self.loss, self.bpc, self.accuracy], feed_dict={self.x: x_batch,
+                l, p, b, a = sess.run([self.loss, self.perplexity, self.bpc, self.accuracy], feed_dict={self.x: x_batch,
                                                                                     self.y: y_batch,
                                                                                     self.output_drop_prob: 0.})
                 total_loss += l
                 if i == 0:
                     total_accuracy = a
                     total_bpc = b
+                    total_perplexity = p
                 else:
                     total_accuracy = (total_accuracy * i + a) / (i + 1)
                     total_bpc = (total_bpc * i + b) / (i + 1)
+                    total_perplexity = (total_perplexity * i + p) / (i + 1)
 
                 if i > 0 and ((i + 1) % 100 == 0 or i == num_batches - 1):
-                    print(f"Step {i + 1} of {num_batches} | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
-            print(f"Final testing stats | Loss: {total_loss}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
+                    print(f"Step {i + 1} of {num_batches} | Loss: {total_loss}, Perplexity: {total_perplexity} BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
+            print(f"Final testing stats | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
 
 if __name__ == '__main__':  # Main function

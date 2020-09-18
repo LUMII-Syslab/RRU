@@ -1,18 +1,59 @@
-# RRU comparison versus GRU and LSTM
+# RRU – Residual Recurrent Unit
 
-## IMDB Sentiment Analysis
+This is project is made for testing RRU performance against it's competitors – GRU, LSTM, MogrifierLSTM
 
-#### Newest way
+## Usage
 
-Run cell_network.py
+DISCLAIMER: Parts of this project may work with your current environment (especially if you comment out MogrifierLSTM code)
 
-#### Old way
+1 – Install Anaconda (if you do not have it yet)
 
-Run LSTM_with_tf_scan.py
+a) Download the installer
+```
+wget https://repo.anaconda.com/archive/Anaconda3-2020.07-Linux-x86_64.sh
+```
 
-## Language modeling
+b) Run the installer
+```
+bash Anaconda3-2020.07-Linux-x86_64.sh
+```
 
-#### Newest way
+c) Refresh the shell, so you can use conda command
+```
+source .bashrc
+```
+
+2 - Create a new conda environment and activate it
+
+a) "test_mogrifier" environment with some things installed
+```
+conda create -n test_mogrifier python=3.6.9 numpy scipy
+```
+
+b) Activate the environment
+```
+conda activate test_mogrifier
+```
+
+3 – Install the remaining requirements
+```
+conda install cudatoolkit
+conda install cudnn
+conda install tensorflow-gpu=1.15
+/root/anaconda3/envs/test_mogrifier/bin/pip3 install sklearn
+/root/anaconda3/envs/test_mogrifier/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
+```
+
+4 – Run the experiments (change the inner configuration if you wish)
+```
+python3 -u lm_efficient_main.py
+```
+
+## Tasks
+
+### Language modeling
+
+#### Newest way (less memory usage)
 
 1 - To get the data, you must run lm_get_data.sh
 
@@ -23,17 +64,17 @@ bash lm_get_data.sh
 ```
 	
 When I added these files to git, it threw message "warning: LF will be replaced by CRLF in get_data.sh.
-", so I hope that it still works.
+", so I hope the script still works.
 
 2 - To prepare the data, you must run lm_efficient_utils.py
 
-You can change vocabulary_size for it in main function, then you have to run it, for it to save it.
+You can change vocabulary_size for it in the main function, then you have to run it, for it to save them.
 
 3 - To start training/validation/testing, run lm_efficient_main.py
 
-Change hyperparameters inside to run different data sets, possiblites atm: enwik8, text8, penn, pennchar, defaultly picks enwik8
+Change hyperparameters inside to run different data sets, possibilites at the moment: enwik8, text8, penn, pennchar, defaultly picks enwik8
 
-#### Old way
+#### Old way (more memory usage)
 
 1 - To get the data, you must run lm_get_data.sh
 
@@ -44,7 +85,7 @@ bash lm_get_data.sh
 ```
 	
 When I added these files to git, it threw message "warning: LF will be replaced by CRLF in get_data.sh.
-", so I hope that it still works.
+", so I hope the script still works.
 
 2 - To prepare the data, you must run lm_utils.py
 
@@ -54,50 +95,12 @@ You can change vocabulary_size, window_size, step_size for it in main function, 
 
 Change hyperparameters inside to run different data sets, possiblites atm: enwik8, text8, penn, pennchar, defaultly picks enwik8
 
-## Mogrifier LSTM
+### IMDB Sentiment Analysis
 
-1 – Install Anaconda
+#### Newest way (Easy to run other cells)
 
-a) Download the installer
+Run cell_network.py
 
-```
-wget https://repo.anaconda.com/archive/Anaconda3-2020.07-Linux-x86_64.sh
-```
+#### Old way (LSTM programmed by hand, so harder to run other cells)
 
-b) Run the installer
-
-```
-bash Anaconda3-2020.07-Linux-x86_64.sh
-```
-
-c) Refresh the shell, so you can use conda command
-
-```
-source .bashrc
-```
-
-2 - Create a new conda environment and activate it
-
-a) "test_mogrifier" environment with some things installed
-
-```
-conda create -n test_mogrifier python=3.6.9 numpy scipy
-```
-
-b) Activate the environment
-
-```
-conda activate test_mogrifier
-```
-
-3 – Install the remaining requirements
-
-```
-conda install cudatoolkit
-conda install cudnn
-conda install tensorflow-gpu=1.15
-/root/anaconda3/envs/test_mogrifier/bin/pip3 install sklearn
-/root/anaconda3/envs/test_mogrifier/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
-```
-
-4 – Run the experiment
+Run LSTM_with_tf_scan.py
