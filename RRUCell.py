@@ -70,6 +70,7 @@ class RRUCell(LayerRNNCell):
 
     def __init__(self,
                  num_units,
+                 output_size,
                  group_size=32,
                  activation=None,
                  reuse=None,
@@ -90,6 +91,7 @@ class RRUCell(LayerRNNCell):
         self.input_spec = input_spec.InputSpec(ndim=2)
 
         self._num_units = num_units
+        self._output_size = output_size
         if activation:
             self._activation = activations.get(activation)
         else:
@@ -107,7 +109,7 @@ class RRUCell(LayerRNNCell):
 
     @property
     def output_size(self):
-        return self._num_units
+        return self._output_size
 
     @tf_utils.shape_type_conversion
     def build(self, inputs_shape):
@@ -132,21 +134,21 @@ class RRUCell(LayerRNNCell):
         self.S_bias = tf.sigmoid(self.S_bias_variable)*1.5
         self._W_kernel = self.add_variable(
             "W/%s" % _WEIGHTS_VARIABLE_NAME,
-            shape=[n_middle_maps, self._num_units],
+            shape=[n_middle_maps, self._num_units+self._output_size],
             initializer=self._kernel_initializer)
         self._W_bias = self.add_variable(
             "W/%s" % _BIAS_VARIABLE_NAME,
-            shape=[self._num_units],
+            shape=[self._num_units+self._output_size],
             initializer=self._bias_initializer)
         self._W_mul = self.add_variable(
             "W_smul/%s"% _BIAS_VARIABLE_NAME,
             shape=(),
             initializer=tf.zeros_initializer())
 
-        self.prev_state_weight = self.add_variable( #todo: check if needed
-            "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
-            shape=(),
-            initializer=tf.ones_initializer())
+        # self.prev_state_weight = self.add_variable( #todo: check if needed
+        #     "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
+        #     shape=(),
+        #     initializer=tf.ones_initializer())
 
         self.built = True
 
@@ -156,8 +158,9 @@ class RRUCell(LayerRNNCell):
 
         # LOWER PART OF THE CELL
         # Concatenate input and last state
-        state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
-        input_and_state = array_ops.concat([inputs, state_drop*self.prev_state_weight], 1)  # Inputs are batch_size x depth
+        #state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
+        state_drop = state
+        input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
 
         # Go through first, Z transformation
         after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
@@ -175,16 +178,25 @@ class RRUCell(LayerRNNCell):
 
         # Do GELU activation
         after_gelu = gelu(after_norm)
+        after_gelu = tf.nn.dropout(after_gelu, rate=self._dropout_rate)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
         #after_w -= tf.reduce_mean(after_w, axis=-1, keepdims=True)
+        candidate = after_w[:,0:self._num_units]
+        output = after_w[:, self._num_units:]
+
 
         # Merge upper and lower parts
         #final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
-        final = state * self.S_bias + after_w * self._W_mul#*np.sqrt(1.0/200)
+        final = state * self.S_bias + candidate * self._W_mul#*np.sqrt(1.0/200)
 
-        return final, final
+        return output, final
+
+    def zero_state(self, batch_size, dtype):
+        value = super().zero_state(batch_size, dtype)
+        initial = np.asarray([1]+[0]*(self._num_units-1))*np.sqrt(self._num_units)*0.25
+        return value+initial
 
     def get_config(self):
         config = {
