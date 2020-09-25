@@ -1,3 +1,6 @@
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
 import tensorflow as tf
 import numpy as np
 import time
@@ -11,13 +14,13 @@ from lm_efficient_utils import get_window_indexes
 from lm_efficient_utils import get_input_data_from_indexes
 
 '''Importing competitor cells'''
-from tiled_lstm import TiledLSTMCell  # Comment this out and you don't have to have dm-sonnet, etc. installed
+#from tiled_lstm import TiledLSTMCell  # Comment this out and you don't have to have dm-sonnet, etc. installed
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 
 '''Importing different versions of our cell (Uncomment the one you want to use)'''
 # from RRUCell import RRUCell
-from GatedRRUCell import RRUCell  # (This currently is the best version)
+from GatedRRUCell_a import RRUCell  # (This currently is the best version)
 # from GatedRRUCell2 import RRUCell
 
 import os
@@ -33,7 +36,8 @@ num_epochs = 1000000  # 5! We can code this to go infinity, but I see no point, 
 break_epochs_no_gain = 3  # If validation bpc doesn't get lower, after how many epochs we should break (-1 -> disabled)
 hidden_units = 256 * 7
 number_of_parameters = 24000000  # 24 million
-embedding_size = 256
+embedding_size = 128
+output_size = 128
 learning_rate = 0.0005  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
 output_keep_prob = 0.9
 
@@ -77,8 +81,8 @@ class RNN_LM_Model:
 
             # Create LSTM/GRU/RRU/MogrifierLSTM cell
             # cell = BasicLSTMCell(hidden_units)
-            cell = GRUCell(hidden_units)
-            # cell = RRUCell(hidden_units, dropout_rate=output_drop_prob)
+            #cell = GRUCell(hidden_units)
+            cell = RRUCell(hidden_units, dropout_rate=output_drop_prob, output_size=output_size)
             # cell = TiledLSTMCell(hidden_units, feature_mask_rank=79, feature_mask_rounds=6)
 
             # Extract the batch size - this allows for variable batch size
@@ -108,7 +112,7 @@ class RNN_LM_Model:
             # tf.summary.scalar("stateWeight", cell.prev_state_weight)
             # tf.summary.scalar("W_mul", cell._W_mul)
 
-            weight = tf.get_variable("weight", [hidden_units, vocabulary_size])
+            weight = tf.get_variable("weight", [output_size, vocabulary_size])
             # Instantiate biases
             bias = tf.Variable(tf.constant(0.0, shape=[vocabulary_size]))
 
@@ -117,7 +121,7 @@ class RNN_LM_Model:
             # value -= tf.reduce_mean(value, [-1], keepdims=True)
             # value = instance_norm(value)
 
-            last = tf.reshape(value, shape=(-1, hidden_units))
+            last = tf.reshape(value, shape=(-1, output_size))
 
             # [batch_size, window_size] -> [batch_size x window_size]
             labels = tf.reshape(y, [-1])
@@ -127,7 +131,7 @@ class RNN_LM_Model:
 
             ''' Last half accuracy predictions '''
             half = window_size // 2
-            half_last = tf.reshape(value[:, half:, :], shape=(-1, hidden_units))
+            half_last = tf.reshape(value[:, half:, :], shape=(-1, output_size))
             half_prediction = tf.matmul(half_last, weight) + bias
             half_y = y[:, half:]
             half_correct_prediction = tf.equal(tf.argmax(half_prediction, axis=1), tf.reshape(half_y, [-1]))
