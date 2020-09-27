@@ -1,5 +1,5 @@
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import tensorflow as tf
 import numpy as np
@@ -12,6 +12,8 @@ from sklearn.utils import shuffle
 from lm_efficient_utils import load_data
 from lm_efficient_utils import get_window_indexes
 from lm_efficient_utils import get_input_data_from_indexes
+#from RAdam import RAdamOptimizer
+from adam_decay import AdamOptimizer_decay
 
 '''Importing competitor cells'''
 #from tiled_lstm import TiledLSTMCell  # Comment this out and you don't have to have dm-sonnet, etc. installed
@@ -19,10 +21,10 @@ from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 
 '''Importing different versions of our cell (Uncomment the one you want to use)'''
-# from RRUCell import RRUCell
-from GatedRRUCell_a import RRUCell  # (This currently is the best version)
+#from RRUCell import RRUCell
+from GatedRRUCell_a import RRUCell, gelu  # (This currently is the best version)
 # from GatedRRUCell2 import RRUCell
-
+from GatedRRUCell_a import instance_norm
 import os
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"  # Jāpārbauda vai ir ātrāk un vai trenējas korekti!
 
@@ -34,12 +36,12 @@ step_size = window_size // 2
 batch_size = 64  # Enwik8 – 64. PTB character-level 128?
 num_epochs = 1000000  # 5! We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 break_epochs_no_gain = 3  # If validation bpc doesn't get lower, after how many epochs we should break (-1 -> disabled)
-hidden_units = 256 * 7
+hidden_units = 256 * 3
 number_of_parameters = 24000000  # 24 million
 embedding_size = 128
-output_size = 128
-learning_rate = 0.0005  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
-output_keep_prob = 0.9
+output_size = 256
+learning_rate = 0.001  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
+output_keep_prob = 0.8
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -104,15 +106,25 @@ class RNN_LM_Model:
                                              dtype=tf.float32)
 
             ''' Uncomment these if you want a lot of extra data (it might take a lot of memory space)'''
-            # Instantiate weights
-            # gate_img = tf.expand_dims(value[0:1, :, :], -1)
-            # tf.summary.image("mem", gate_img, max_outputs=16)
-            # tf.summary.image("mem", tf.transpose(gate_img, [0, 2, 1, 3]), max_outputs=16)
-            # tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
-            # tf.summary.scalar("stateWeight", cell.prev_state_weight)
-            # tf.summary.scalar("W_mul", cell._W_mul)
+            # value = value_all[:, :, :output_size]
+            # gate = value_all[:, :, output_size:output_size+hidden_units]
+            # hidden_mem = value_all[:, :, output_size + hidden_units:]
+            # # Instantiate weights
+            # gate_img = tf.expand_dims(gate[0:1, :, :], -1)
+            # tf.summary.image("gate", tf.transpose(gate_img, [0, 2, 1, 3]), max_outputs=16)
+            # tf.summary.histogram("gate", gate_img)
+            #
+            # hidden_img = tf.expand_dims(hidden_mem[0:1, :, :], -1)
+            # tf.summary.image("state", tf.transpose(hidden_img, [0, 2, 1, 3]), max_outputs=16)
+            # tf.summary.histogram("state", hidden_img)
+            #tf.summary.scalar("candWeight", cell.candidate_weight)
 
-            weight = tf.get_variable("weight", [output_size, vocabulary_size])
+            #tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
+            # tf.summary.scalar("stateWeight", cell.prev_state_weight)
+            #tf.summary.scalar("W_mul", cell._W_mul)
+
+
+            weight = tf.get_variable("output", [output_size, vocabulary_size])
             # Instantiate biases
             bias = tf.Variable(tf.constant(0.0, shape=[vocabulary_size]))
 
@@ -120,7 +132,7 @@ class RNN_LM_Model:
             # value = tf.stack(value, axis=1)
             # value -= tf.reduce_mean(value, [-1], keepdims=True)
             # value = instance_norm(value)
-
+            value = gelu(value)
             last = tf.reshape(value, shape=(-1, output_size))
 
             # [batch_size, window_size] -> [batch_size x window_size]
@@ -155,9 +167,13 @@ class RNN_LM_Model:
             perplexity = tf.exp(loss)
 
             tf.summary.scalar("perplexity", perplexity)
-
+            decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
+            for c in decay_vars:
+                print(c)
             # Declare our optimizer, we have to check which one works better.
-            optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+            #optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+            optimizer = AdamOptimizer_decay(learning_rate=learning_rate, L2_decay=0.01, decay_vars=decay_vars).minimize(loss)
+            #optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
             # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
             # Expose symbols to class
@@ -173,7 +189,6 @@ class RNN_LM_Model:
             self.correct_prediction = correct_prediction
 
             tvars = tf.trainable_variables()
-            print(tvars)
             vsum = 0
             for v in tvars:
                 vsum += np.product(v.get_shape().as_list())
@@ -228,13 +243,21 @@ class RNN_LM_Model:
                     # Now we have batch of integers to look in text from
                     x_batch, y_batch = get_input_data_from_indexes(train_data, x_batch, window_size)
 
-                    s, _, l, p, b, a = sess.run([merged_summary,
-                                                 self.optimizer, self.loss, self.perplexity, self.bpc, self.accuracy],
-                                                feed_dict={self.x: x_batch,
-                                                self.y: y_batch,
-                                                self.output_drop_prob: 1 - output_keep_prob})
 
-                    # train_writer.add_summary(s, i + epoch * num_batches)
+                    if i % 10 == 0:
+                        s, _, l, p, b, a = sess.run([merged_summary,
+                                                     self.optimizer, self.loss, self.perplexity, self.bpc, self.accuracy],
+                                                    feed_dict={self.x: x_batch,
+                                                               self.y: y_batch,
+                                                               self.output_drop_prob: 1 - output_keep_prob})
+
+                        train_writer.add_summary(s, i + epoch * num_batches)
+                    else:
+                        _, l, p, b, a = sess.run([self.optimizer, self.loss, self.perplexity, self.bpc, self.accuracy],
+                                                    feed_dict={self.x: x_batch,
+                                                               self.y: y_batch,
+                                                               self.output_drop_prob: 1 - output_keep_prob})
+
                     total_loss += l
                     if i == 0:
                         total_accuracy = a
@@ -246,6 +269,7 @@ class RNN_LM_Model:
                         total_perplexity = (total_perplexity * i + p) / (i + 1)
 
                     if i > 0 and ((i + 1) % 100 == 0 or i == num_batches - 1):
+                        # train_writer.add_summary(s, i + epoch * num_batches)
                         print(f"Step {i + 1} of {num_batches} | Loss: {l}, Perplexity: {p}, BPC: {b}, Accuracy: {a}, TimeFromStart: {time.time() - start_time}")
 
                 print(f"   Epoch {epoch + 1} | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
@@ -307,6 +331,7 @@ class RNN_LM_Model:
                     epoch_bpc_summary = tf.Summary()
                     epoch_bpc_summary.value.add(tag='epoch_bpc', simple_value=total_val_bpc)
                     validation_writer.add_summary(epoch_bpc_summary, epoch + 1)
+                    validation_writer.flush()
 
                     '''Here the training and validation epoch have been run, now get the lowest validation bpc model'''
                     # Check if validation perplexity was better
@@ -457,14 +482,14 @@ def find_optimal_hidden_units():
 if __name__ == '__main__':  # Main function
     TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
-    # To see how it trains in small amounts
-    '''
-    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 90]
-    VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]
-    TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
-    '''
+    # # To see how it trains in small amounts
+    # #'''
+    # TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 20]
+    # VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]
+    # TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
+    # #'''
 
-    hidden_units = find_optimal_hidden_units()
+    #hidden_units = find_optimal_hidden_units()
 
     model = RNN_LM_Model()  # Create the model
 

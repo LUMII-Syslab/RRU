@@ -109,6 +109,7 @@ class RRUCell(LayerRNNCell):
 
     @property
     def output_size(self):
+        #return self._output_size+self._num_units*2
         return self._output_size
 
     @tf_utils.shape_type_conversion
@@ -145,10 +146,15 @@ class RRUCell(LayerRNNCell):
             shape=(),
             initializer=tf.zeros_initializer())
 
-        self.prev_state_weight = self.add_variable(  # TODO: check if needed
-            "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
-            shape=(),
-            initializer=tf.ones_initializer())
+        # self.prev_state_weight = self.add_variable(  # TODO: check if needed
+        #     "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
+        #     shape=(),
+        #     initializer=tf.ones_initializer())
+        #
+        # self.candidate_weight = self.add_variable(  # TODO: check if needed
+        #     "cand_weight/%s"% _BIAS_VARIABLE_NAME,
+        #     shape=(),
+        #     initializer=tf.constant_initializer(1.0))
 
         self.built = True
 
@@ -161,6 +167,7 @@ class RRUCell(LayerRNNCell):
         # state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
         state_drop = state
         input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
+        #input_and_state = tf.nn.dropout(input_and_state, rate=self._dropout_rate)
 
         # Go through first transformation – Z
         after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
@@ -180,23 +187,34 @@ class RRUCell(LayerRNNCell):
 
         # Do GELU activation
         after_gelu = gelu(after_norm)
+        after_gelu = tf.nn.dropout(after_gelu, rate=self._dropout_rate)
         # Do ReLU activation
         # after_gelu = tf.nn.relu(after_norm)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
         #after_w, gate = tf.split(after_w, 2, axis=-1)
-        candidate = after_w[:,0:self._num_units]
+        candidate = after_w[:,0:self._num_units]#*self.candidate_weight
         gate = after_w[:, self._num_units:2*self._num_units]
         output = after_w[:, 2*self._num_units:]
         gate = tf.sigmoid(gate+1)
 
         # Merge upper and lower parts
-        #final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
-        #final = state * self.S_bias + after_w * self._W_mul#*np.sqrt(1.0/200)
-        final = state*gate+candidate*(1-gate)
+        #final_state = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
+        #final_state = state * self.S_bias + after_w * self._W_mul#*np.sqrt(1.0/200)
+        final_state = state*gate+candidate*(1-gate)
+        factor = tf.sqrt(tf.square(gate) + tf.square(1.0 - gate))
+        final_state *= factor
 
-        return output, final
+        #return tf.concat([output, gate, candidate], axis=-1), final_state
+        return output, final_state
+
+    def zero_state(self, batch_size, dtype):
+        value = super().zero_state(batch_size, dtype)
+        onehot = np.asarray([1.]+[0.]*(self._num_units-1))
+        onehot -= 1/self._num_units
+        initial = onehot*np.sqrt(self._num_units)
+        return value+initial
 
     def get_config(self):
         config = {
@@ -254,3 +272,9 @@ def instance_norm(cur):
     variance = tf.reduce_mean(tf.square(cur), [-1], keepdims=True)
     cur = cur * tf.rsqrt(variance + 1e-6)
     return cur
+
+# def softsign2(x):
+#     return (1 - 1 / tf.square(tf.abs(x/2)+1)) * tf.sign(x)
+#
+# def soft_sigmoid(x):
+#     return (softsign2(x) + 1) * 0.5
