@@ -66,150 +66,148 @@ class RNN_LM_Model:
 
     def __init__(self):
 
-        def __graph__():
-            tf.reset_default_graph()  # Build the graph
-
-            # Batch size list of integer sequences
-            x = tf.placeholder(tf.int32, shape=[None, window_size], name="x")
-
-            # Labels for word prediction
-            y = tf.placeholder(tf.int64, shape=[None, window_size], name="y")
-
-            # Output drop probability so we can pass different values depending on training / testing
-            output_drop_prob = tf.placeholder(tf.float32, name='output_drop_prob')
-
-            # Instantiate our embedding matrix
-            embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0),
-                                    name="word_embedding")
-
-            # Lookup embeddings
-            embed_lookup = tf.nn.embedding_lookup(embedding, x)
-
-            # Create RNN cell (RRU/GRU/LSTM/MogrifierLSTM)
-            cell = RRUCell(hidden_units, dropout_rate=output_drop_prob, output_size=output_size)
-            # cell = GRUCell(hidden_units)
-            # cell = BasicLSTMCell(hidden_units)
-            # cell = TiledLSTMCell(hidden_units, feature_mask_rank=79, feature_mask_rounds=6)
-
-            # Our cell uses output size that differs from the hidden_size, but not all RNN cells does this. And if the
-            # cell doesn't use a different output_size, we need to make it as hidden units for the program to work.
-            final_size = output_size
-            if final_size is None:
-                final_size = hidden_units
-
-            # Extract the batch size - this allows for variable batch size
-            current_batch_size = tf.shape(x)[0]
-
-            # Create the initial state of zeros
-            initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
-            # initial_state+=np.asarray([1.0, -1.0]*(initial_state.get_shape().as_list()[-1]//2))*0.1
-            # initial_state += 0.1
-
-            # Wrap our cell in a dropout wrapper
-            # cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
-
-            # Value will have all the outputs. State contains hidden states between the steps.
-            # embed_lookup = tf.unstack(embed_lookup, axis=1)
-            value, state = tf.nn.dynamic_rnn(cell,
-                                             embed_lookup,
-                                             initial_state=initial_state,
-                                             dtype=tf.float32)
-
-            ''' Uncomment these if you want a lot of extra data (it might take a lot of memory space)'''
-            # value = value_all[:, :, :final_size]
-            # gate = value_all[:, :, final_size:final_size+hidden_units]
-            # hidden_mem = value_all[:, :, final_size + hidden_units:]
-            # # Instantiate weights
-            # gate_img = tf.expand_dims(gate[0:1, :, :], -1)
-            # tf.summary.image("gate", tf.transpose(gate_img, [0, 2, 1, 3]), max_outputs=16)
-            # tf.summary.histogram("gate", gate_img)
-            #
-            # hidden_img = tf.expand_dims(hidden_mem[0:1, :, :], -1)
-            # tf.summary.image("state", tf.transpose(hidden_img, [0, 2, 1, 3]), max_outputs=16)
-            # tf.summary.histogram("state", hidden_img)
-            # tf.summary.scalar("candWeight", cell.candidate_weight)
-
-            # tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
-            # tf.summary.scalar("stateWeight", cell.prev_state_weight)
-            # tf.summary.scalar("W_mul", cell._W_mul)
-
-            # I think we need final_size = hidden_size if the cell doesn't have final_size
-
-            weight = tf.get_variable("output", [final_size, vocabulary_size])
-            # Instantiate biases
-            bias = tf.Variable(tf.constant(0.0, shape=[vocabulary_size]))
-
-            # [batch_size, max_time, hidden_units] -> [batch_size x max_time, hidden_units]
-            # value = tf.stack(value, axis=1)
-            # value -= tf.reduce_mean(value, [-1], keepdims=True)
-            # value = instance_norm(value)
-            value = gelu(value)
-            # value = tf.nn.swish(value)  # Testing
-
-            last = tf.reshape(value, shape=(-1, final_size))
-
-            # [batch_size, window_size] -> [batch_size x window_size]
-            labels = tf.reshape(y, [-1])
-
-            # Final form should be [batch_size x max_time, vocabulary_size]
-            prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
-
-            ''' Last half accuracy predictions '''
-            half = window_size // 2
-            half_last = tf.reshape(value[:, half:, :], shape=(-1, final_size))
-            half_prediction = tf.matmul(half_last, weight) + bias
-            half_y = y[:, half:]
-            half_correct_prediction = tf.equal(tf.argmax(half_prediction, axis=1), tf.reshape(half_y, [-1]))
-            half_accuracy = tf.reduce_mean(tf.cast(half_correct_prediction, tf.float32))
-            tf.summary.scalar("half_accuracy", half_accuracy)
-            ''' Full size accuracy predicions '''
-            correct_prediction = tf.equal(tf.argmax(prediction, axis=1), labels)
-
-            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-            tf.summary.scalar("accuracy", accuracy)
-
-            # Calculate the loss given prediction and labels
-            loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=labels))
-
-            tf.summary.scalar("loss", loss)
-
-            bpc = tf.reduce_mean(loss)/np.log(2)
-
-            tf.summary.scalar("bpc", bpc)
-
-            perplexity = tf.exp(loss)
-
-            tf.summary.scalar("perplexity", perplexity)
-            decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
-            for c in decay_vars:
-                print(c)
-            # Declare our optimizer, we have to check which one works better.
-            #optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
-            optimizer = AdamOptimizer_decay(learning_rate=learning_rate, L2_decay=0.01, decay_vars=decay_vars).minimize(loss)
-            #optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
-            # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
-
-            # Expose symbols to class
-            self.x = x
-            self.y = y
-            self.output_drop_prob = output_drop_prob
-            self.loss = loss
-            self.perplexity = perplexity
-            self.bpc = bpc
-            self.optimizer = optimizer
-            self.accuracy = accuracy
-            self.prediction = prediction
-            self.correct_prediction = correct_prediction
-
-            tvars = tf.trainable_variables()
-            vsum = 0
-            for v in tvars:
-                vsum += np.product(v.get_shape().as_list())
-            print("learnable parameters:", vsum / 1024 / 1024, 'M', flush=True)
-
-        # Build graph
         print("\nBuilding Graph...\n")
-        __graph__()
+
+        tf.reset_default_graph()  # Build the graph
+
+        # Batch size list of integer sequences
+        x = tf.placeholder(tf.int32, shape=[None, window_size], name="x")
+
+        # Labels for word prediction
+        y = tf.placeholder(tf.int64, shape=[None, window_size], name="y")
+
+        # Output drop probability so we can pass different values depending on training / testing
+        output_drop_prob = tf.placeholder(tf.float32, name='output_drop_prob')
+
+        # Instantiate our embedding matrix
+        embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0),
+                                name="word_embedding")
+
+        # Lookup embeddings
+        embed_lookup = tf.nn.embedding_lookup(embedding, x)
+
+        # Create RNN cell (RRU/GRU/LSTM/MogrifierLSTM)
+        cell = RRUCell(hidden_units, dropout_rate=output_drop_prob, output_size=output_size)
+        # cell = GRUCell(hidden_units)
+        # cell = BasicLSTMCell(hidden_units)
+        # cell = TiledLSTMCell(hidden_units, feature_mask_rank=79, feature_mask_rounds=6)
+
+        # Our cell uses output size that differs from the hidden_size, but not all RNN cells does this. And if the
+        # cell doesn't use a different output_size, we need to make it as hidden units for the program to work.
+        final_size = output_size
+        if final_size is None:
+            final_size = hidden_units
+
+        # Extract the batch size - this allows for variable batch size
+        current_batch_size = tf.shape(x)[0]
+
+        # Create the initial state of zeros
+        initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
+        # initial_state+=np.asarray([1.0, -1.0]*(initial_state.get_shape().as_list()[-1]//2))*0.1
+        # initial_state += 0.1
+
+        # Wrap our cell in a dropout wrapper
+        # cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
+
+        # Value will have all the outputs. State contains hidden states between the steps.
+        # embed_lookup = tf.unstack(embed_lookup, axis=1)
+        value, state = tf.nn.dynamic_rnn(cell,
+                                         embed_lookup,
+                                         initial_state=initial_state,
+                                         dtype=tf.float32)
+
+        ''' Uncomment these if you want a lot of extra data (it might take a lot of memory space)'''
+        # value = value_all[:, :, :final_size]
+        # gate = value_all[:, :, final_size:final_size+hidden_units]
+        # hidden_mem = value_all[:, :, final_size + hidden_units:]
+        # # Instantiate weights
+        # gate_img = tf.expand_dims(gate[0:1, :, :], -1)
+        # tf.summary.image("gate", tf.transpose(gate_img, [0, 2, 1, 3]), max_outputs=16)
+        # tf.summary.histogram("gate", gate_img)
+        #
+        # hidden_img = tf.expand_dims(hidden_mem[0:1, :, :], -1)
+        # tf.summary.image("state", tf.transpose(hidden_img, [0, 2, 1, 3]), max_outputs=16)
+        # tf.summary.histogram("state", hidden_img)
+        # tf.summary.scalar("candWeight", cell.candidate_weight)
+
+        # tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
+        # tf.summary.scalar("stateWeight", cell.prev_state_weight)
+        # tf.summary.scalar("W_mul", cell._W_mul)
+
+        # I think we need final_size = hidden_size if the cell doesn't have final_size
+
+        weight = tf.get_variable("output", [final_size, vocabulary_size])
+        # Instantiate biases
+        bias = tf.Variable(tf.constant(0.0, shape=[vocabulary_size]))
+
+        # [batch_size, max_time, hidden_units] -> [batch_size x max_time, hidden_units]
+        # value = tf.stack(value, axis=1)
+        # value -= tf.reduce_mean(value, [-1], keepdims=True)
+        # value = instance_norm(value)
+        value = gelu(value)
+        # value = tf.nn.swish(value)  # Testing
+
+        last = tf.reshape(value, shape=(-1, final_size))
+
+        # [batch_size, window_size] -> [batch_size x window_size]
+        labels = tf.reshape(y, [-1])
+
+        # Final form should be [batch_size x max_time, vocabulary_size]
+        prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
+
+        ''' Last half accuracy predictions '''
+        half = window_size // 2
+        half_last = tf.reshape(value[:, half:, :], shape=(-1, final_size))
+        half_prediction = tf.matmul(half_last, weight) + bias
+        half_y = y[:, half:]
+        half_correct_prediction = tf.equal(tf.argmax(half_prediction, axis=1), tf.reshape(half_y, [-1]))
+        half_accuracy = tf.reduce_mean(tf.cast(half_correct_prediction, tf.float32))
+        tf.summary.scalar("half_accuracy", half_accuracy)
+        ''' Full size accuracy predicions '''
+        correct_prediction = tf.equal(tf.argmax(prediction, axis=1), labels)
+
+        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+        tf.summary.scalar("accuracy", accuracy)
+
+        # Calculate the loss given prediction and labels
+        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=labels))
+
+        tf.summary.scalar("loss", loss)
+
+        bpc = tf.reduce_mean(loss)/np.log(2)
+
+        tf.summary.scalar("bpc", bpc)
+
+        perplexity = tf.exp(loss)
+
+        tf.summary.scalar("perplexity", perplexity)
+        decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
+        for c in decay_vars:
+            print(c)
+        # Declare our optimizer, we have to check which one works better.
+        #optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+        optimizer = AdamOptimizer_decay(learning_rate=learning_rate, L2_decay=0.01, decay_vars=decay_vars).minimize(loss)
+        #optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
+        # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
+
+        # Expose symbols to class
+        self.x = x
+        self.y = y
+        self.output_drop_prob = output_drop_prob
+        self.loss = loss
+        self.perplexity = perplexity
+        self.bpc = bpc
+        self.optimizer = optimizer
+        self.accuracy = accuracy
+        self.prediction = prediction
+        self.correct_prediction = correct_prediction
+
+        tvars = tf.trainable_variables()
+        vsum = 0
+        for v in tvars:
+            vsum += np.product(v.get_shape().as_list())
+        print("learnable parameters:", vsum / 1024 / 1024, 'M', flush=True)
+
         print("\nGraph Built...\n")
 
     def fit(self, train_data, valid_data=None):
