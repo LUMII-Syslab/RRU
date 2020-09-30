@@ -1,5 +1,9 @@
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#
+# You can check if this line makes it train faster, while still training correctly
+# os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 import tensorflow as tf
 import numpy as np
@@ -7,26 +11,26 @@ import time
 import math
 from datetime import datetime  # We'll use this to dynamically generate training event names
 
-from sklearn.utils import shuffle
+from sklearn.utils import shuffle  # We use this to shuffle training data
 
+# Importing some functions that will help us deal with the input data
 from lm_efficient_utils import load_data
 from lm_efficient_utils import get_window_indexes
 from lm_efficient_utils import get_input_data_from_indexes
-#from RAdam import RAdamOptimizer
+
+# Importing fancier optimizer(s)
+# from RAdam import RAdamOptimizer
 from adam_decay import AdamOptimizer_decay
 
-'''Importing competitor cells'''
-#from tiled_lstm import TiledLSTMCell  # Comment this out and you don't have to have dm-sonnet, etc. installed
+# Importing competitor cells
+from tiled_lstm import TiledLSTMCell  # Comment this out and you don't have to have dm-sonnet, etc. installed
 from BasicLSTMCell import BasicLSTMCell
 from GRUCell import GRUCell
 
-'''Importing different versions of our cell (Uncomment the one you want to use)'''
-#from RRUCell import RRUCell
+# Importing different versions of our cell (Uncomment the one you want to use)
+# from RRUCell import RRUCell
 from GatedRRUCell_a import RRUCell, gelu  # (This currently is the best version)
 # from GatedRRUCell2 import RRUCell
-from GatedRRUCell_a import instance_norm
-import os
-# os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"  # Jāpārbauda vai ir ātrāk un vai trenējas korekti!
 
 # Hyperparameters
 data_set_name = "enwik8"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
@@ -34,14 +38,14 @@ vocabulary_size = None  # We will load this from a pickle file, so changing this
 window_size = 512  # Enwik8 – 512. Text8 512?, PTB word-level 70?, PTB character-level 150?
 step_size = window_size // 2
 batch_size = 64  # Enwik8 – 64. PTB character-level 128?
-num_epochs = 1000000  # 5! We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
-break_epochs_no_gain = 3  # If validation bpc doesn't get lower, after how many epochs we should break (-1 -> disabled)
-hidden_units = 256 * 3
-number_of_parameters = 24000000  # 24 million
+num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
+break_epochs_no_gain = 3  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
+hidden_units = 1024  # This will only be used if the number_of_parameters is None or < 1
+number_of_parameters = 12000000  # 12 million
 embedding_size = 128
-output_size = 256
+output_size = 256  # 256 for GatedRRUCell_a, None for every other version that doesn't specify this variable
 learning_rate = 0.001  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
-output_keep_prob = 0.8
+output_keep_prob = 0.8  # We pass this to our RRU cell, if it's in the training mode
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -81,11 +85,17 @@ class RNN_LM_Model:
             # Lookup embeddings
             embed_lookup = tf.nn.embedding_lookup(embedding, x)
 
-            # Create LSTM/GRU/RRU/MogrifierLSTM cell
-            # cell = BasicLSTMCell(hidden_units)
-            #cell = GRUCell(hidden_units)
+            # Create RNN cell (RRU/GRU/LSTM/MogrifierLSTM)
             cell = RRUCell(hidden_units, dropout_rate=output_drop_prob, output_size=output_size)
+            # cell = GRUCell(hidden_units)
+            # cell = BasicLSTMCell(hidden_units)
             # cell = TiledLSTMCell(hidden_units, feature_mask_rank=79, feature_mask_rounds=6)
+
+            # Our cell uses output size that differs from the hidden_size, but not all RNN cells does this. And if the
+            # cell doesn't use a different output_size, we need to make it as hidden units for the program to work.
+            final_size = output_size
+            if final_size is None:
+                final_size = hidden_units
 
             # Extract the batch size - this allows for variable batch size
             current_batch_size = tf.shape(x)[0]
@@ -106,9 +116,9 @@ class RNN_LM_Model:
                                              dtype=tf.float32)
 
             ''' Uncomment these if you want a lot of extra data (it might take a lot of memory space)'''
-            # value = value_all[:, :, :output_size]
-            # gate = value_all[:, :, output_size:output_size+hidden_units]
-            # hidden_mem = value_all[:, :, output_size + hidden_units:]
+            # value = value_all[:, :, :final_size]
+            # gate = value_all[:, :, final_size:final_size+hidden_units]
+            # hidden_mem = value_all[:, :, final_size + hidden_units:]
             # # Instantiate weights
             # gate_img = tf.expand_dims(gate[0:1, :, :], -1)
             # tf.summary.image("gate", tf.transpose(gate_img, [0, 2, 1, 3]), max_outputs=16)
@@ -117,14 +127,15 @@ class RNN_LM_Model:
             # hidden_img = tf.expand_dims(hidden_mem[0:1, :, :], -1)
             # tf.summary.image("state", tf.transpose(hidden_img, [0, 2, 1, 3]), max_outputs=16)
             # tf.summary.histogram("state", hidden_img)
-            #tf.summary.scalar("candWeight", cell.candidate_weight)
+            # tf.summary.scalar("candWeight", cell.candidate_weight)
 
-            #tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
+            # tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
             # tf.summary.scalar("stateWeight", cell.prev_state_weight)
-            #tf.summary.scalar("W_mul", cell._W_mul)
+            # tf.summary.scalar("W_mul", cell._W_mul)
 
+            # I think we need final_size = hidden_size if the cell doesn't have final_size
 
-            weight = tf.get_variable("output", [output_size, vocabulary_size])
+            weight = tf.get_variable("output", [final_size, vocabulary_size])
             # Instantiate biases
             bias = tf.Variable(tf.constant(0.0, shape=[vocabulary_size]))
 
@@ -133,7 +144,9 @@ class RNN_LM_Model:
             # value -= tf.reduce_mean(value, [-1], keepdims=True)
             # value = instance_norm(value)
             value = gelu(value)
-            last = tf.reshape(value, shape=(-1, output_size))
+            # value = tf.nn.swish(value)  # Testing
+
+            last = tf.reshape(value, shape=(-1, final_size))
 
             # [batch_size, window_size] -> [batch_size x window_size]
             labels = tf.reshape(y, [-1])
@@ -143,7 +156,7 @@ class RNN_LM_Model:
 
             ''' Last half accuracy predictions '''
             half = window_size // 2
-            half_last = tf.reshape(value[:, half:, :], shape=(-1, output_size))
+            half_last = tf.reshape(value[:, half:, :], shape=(-1, final_size))
             half_prediction = tf.matmul(half_last, weight) + bias
             half_y = y[:, half:]
             half_correct_prediction = tf.equal(tf.argmax(half_prediction, axis=1), tf.reshape(half_y, [-1]))
@@ -417,7 +430,7 @@ def find_optimal_hidden_units():
     global hidden_units
 
     # If there wasn't given correct number of total parameters, then just use the given hidden units
-    if number_of_parameters < 1:
+    if number_of_parameters is None or number_of_parameters < 1:
         return hidden_units
 
     # If code goes this far, we don't care about the value in hidden_units variable anymore
@@ -482,17 +495,17 @@ def find_optimal_hidden_units():
 if __name__ == '__main__':  # Main function
     TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
-    # # To see how it trains in small amounts
-    # #'''
-    # TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 20]
-    # VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]
-    # TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
-    # #'''
+    # To see how it trains in small amounts
+    '''
+    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 20]
+    VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]
+    TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
+    '''
 
-    #hidden_units = find_optimal_hidden_units()
+    hidden_units = find_optimal_hidden_units()
 
     model = RNN_LM_Model()  # Create the model
 
     model.fit(TRAIN_DATA, VALID_DATA)  # Train the model (validating after each epoch)
 
-    model.evaluate(TEST_DATA)  # Test the model
+    model.evaluate(TEST_DATA)  # Test the last saved model

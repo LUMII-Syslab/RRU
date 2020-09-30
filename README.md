@@ -48,7 +48,7 @@ conda install tensorflow-gpu=1.15
 
 You can see the instructions for each task below.
 
-4 – Run the experiments (change the inner configuration if you wish)
+5 – Run the experiments (change the inner configuration if you wish)
 ```
 python3 -u lm_efficient_main.py
 ```
