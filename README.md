@@ -1,6 +1,6 @@
 # RRU – Residual Recurrent Unit
 
-This is project is made for testing RRU performance against it's competitors – GRU, LSTM, MogrifierLSTM
+This is project is made for creating an environment in which we can test the performance of our RRU cell against it's competitors – GRU, LSTM, MogrifierLSTM
 
 ## Usage
 
@@ -43,6 +43,10 @@ conda install tensorflow-gpu=1.15
 /root/anaconda3/envs/test_mogrifier/bin/pip3 install sklearn
 /root/anaconda3/envs/test_mogrifier/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
 ```
+
+4 – You might have to download the data, if you haven't done it yet (depends on the task)
+
+You can see the instructions for each task below.
 
 4 – Run the experiments (change the inner configuration if you wish)
 ```
