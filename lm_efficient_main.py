@@ -29,7 +29,8 @@ from GRUCell import GRUCell
 
 # Importing different versions of our cell (Uncomment the one you want to use)
 # from RRUCell import RRUCell
-from GatedRRUCell_a import RRUCell, gelu  # (This currently is the best version)
+from GatedRRUCell import RRUCell, gelu
+# from GatedRRUCell_a import RRUCell, gelu  # (This currently is the best version)
 # from GatedRRUCell2 import RRUCell
 
 # Hyperparameters
@@ -41,14 +42,21 @@ batch_size = 64  # Enwik8 – 64. PTB character-level 128?
 num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 break_epochs_no_gain = 3  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
 hidden_units = 1024  # This will only be used if the number_of_parameters is None or < 1
-number_of_parameters = 12000000  # 12 million
+number_of_parameters = 48000000  # 48 million learnable parameters
 embedding_size = 128
-output_size = 256  # 256 for GatedRRUCell_a, None for every other version that doesn't specify this variable
-learning_rate = 0.001  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
-output_keep_prob = 0.8  # We pass this to our RRU cell, if it's in the training mode
+output_size = None  # 256 for GatedRRUCell_a, None for every other version that doesn't specify this variable
+learning_rate = 0.0005  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
+output_keep_prob = 0.9  # We pass this to our RRU cell, if it's in the training mode
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
+
+# After how many steps should we send the data to TensorBoard (0 – don't log after any amount of steps)
+log_after_this_many_steps = 10
+assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
+# After how many steps should we print the results of training/validating/testing (0 – don't print until the last step)
+print_after_this_many_steps = 1
+assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
 # Uncomment the corresponding model name for the cell you are using
 # model_name = 'lstm_model'  # BasicLSTMCell.py
@@ -62,7 +70,7 @@ current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
 output_path = log_path + model_name + '/enwik8/' + current_time
 
 
-class RNN_LM_Model:
+class RNNLMModel:
 
     def __init__(self):
 
@@ -76,24 +84,27 @@ class RNN_LM_Model:
         # Labels for word prediction
         y = tf.placeholder(tf.int64, shape=[None, window_size], name="y")
 
-        # Output drop probability so we can pass different values depending on training / testing
+        # Output drop probability so we can pass different values depending on training/validating/testing
         output_drop_prob = tf.placeholder(tf.float32, name='output_drop_prob')
 
         # Instantiate our embedding matrix
-        embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0),
-                                name="word_embedding")
+        embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0), name="word_embedding")
 
         # Lookup embeddings
         embed_lookup = tf.nn.embedding_lookup(embedding, x)
 
         # Create RNN cell (RRU/GRU/LSTM/MogrifierLSTM)
-        cell = RRUCell(hidden_units, dropout_rate=output_drop_prob, output_size=output_size)
+        # For RRU versions that doesn't have a specific output size (GatedRRUCell.py, for example)
+        cell = RRUCell(hidden_units, dropout_rate=output_drop_prob)
+        # For RRU versions that does have a specific output size (GatedRRUCell_a.py, for example)
+        # cell = RRUCell(hidden_units, dropout_rate=output_drop_prob, output_size=output_size)
+        # Competitor cells
         # cell = GRUCell(hidden_units)
         # cell = BasicLSTMCell(hidden_units)
         # cell = TiledLSTMCell(hidden_units, feature_mask_rank=79, feature_mask_rounds=6)
 
-        # Our cell uses output size that differs from the hidden_size, but not all RNN cells does this. And if the
-        # cell doesn't use a different output_size, we need to make it as hidden units for the program to work.
+        # Our GatedRRUCell_a uses output size that differs from the hidden_size, but not all RNN cells does this. And
+        # if the cell doesn't use a different output_size, we need to make it as hidden units for the program to work.
         final_size = output_size
         if final_size is None:
             final_size = hidden_units
@@ -103,7 +114,7 @@ class RNN_LM_Model:
 
         # Create the initial state of zeros
         initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
-        # initial_state+=np.asarray([1.0, -1.0]*(initial_state.get_shape().as_list()[-1]//2))*0.1
+        # initial_state += np.asarray([1.0, -1.0] * (initial_state.get_shape().as_list()[-1] // 2)) * 0.1
         # initial_state += 0.1
 
         # Wrap our cell in a dropout wrapper
@@ -116,7 +127,7 @@ class RNN_LM_Model:
                                          initial_state=initial_state,
                                          dtype=tf.float32)
 
-        ''' Uncomment these if you want a lot of extra data (it might take a lot of memory space)'''
+        ''' Uncomment these if you want a lot of extra data (it takes a lot of memory space, though) '''
         # value = value_all[:, :, :final_size]
         # gate = value_all[:, :, final_size:final_size+hidden_units]
         # hidden_mem = value_all[:, :, final_size + hidden_units:]
@@ -124,35 +135,30 @@ class RNN_LM_Model:
         # gate_img = tf.expand_dims(gate[0:1, :, :], -1)
         # tf.summary.image("gate", tf.transpose(gate_img, [0, 2, 1, 3]), max_outputs=16)
         # tf.summary.histogram("gate", gate_img)
-        #
         # hidden_img = tf.expand_dims(hidden_mem[0:1, :, :], -1)
         # tf.summary.image("state", tf.transpose(hidden_img, [0, 2, 1, 3]), max_outputs=16)
         # tf.summary.histogram("state", hidden_img)
         # tf.summary.scalar("candWeight", cell.candidate_weight)
-
         # tf.summary.histogram("s_mul", tf.sigmoid(cell.S_bias_variable)*1.5)
         # tf.summary.scalar("stateWeight", cell.prev_state_weight)
         # tf.summary.scalar("W_mul", cell._W_mul)
-
-        # I think we need final_size = hidden_size if the cell doesn't have final_size
 
         weight = tf.get_variable("output", [final_size, vocabulary_size])
         # Instantiate biases
         bias = tf.Variable(tf.constant(0.0, shape=[vocabulary_size]))
 
-        # [batch_size, max_time, hidden_units] -> [batch_size x max_time, hidden_units]
+        # [batch_size, window_size, final_size] -> [batch_size x window_size, final_size]
         # value = tf.stack(value, axis=1)
         # value -= tf.reduce_mean(value, [-1], keepdims=True)
         # value = instance_norm(value)
         value = gelu(value)
-        # value = tf.nn.swish(value)  # Testing
 
         last = tf.reshape(value, shape=(-1, final_size))
 
         # [batch_size, window_size] -> [batch_size x window_size]
         labels = tf.reshape(y, [-1])
 
-        # Final form should be [batch_size x max_time, vocabulary_size]
+        # Final form should be [batch_size x window_size, vocabulary_size]
         prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
 
         ''' Last half accuracy predictions '''
@@ -163,7 +169,7 @@ class RNN_LM_Model:
         half_correct_prediction = tf.equal(tf.argmax(half_prediction, axis=1), tf.reshape(half_y, [-1]))
         half_accuracy = tf.reduce_mean(tf.cast(half_correct_prediction, tf.float32))
         tf.summary.scalar("half_accuracy", half_accuracy)
-        ''' Full size accuracy predicions '''
+        ''' Full size accuracy predictions '''
         correct_prediction = tf.equal(tf.argmax(prediction, axis=1), labels)
 
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
@@ -181,13 +187,18 @@ class RNN_LM_Model:
         perplexity = tf.exp(loss)
 
         tf.summary.scalar("perplexity", perplexity)
+
+        # Printing trainable variables which have "kernel" in their name
         decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
         for c in decay_vars:
             print(c)
+
         # Declare our optimizer, we have to check which one works better.
-        #optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
-        optimizer = AdamOptimizer_decay(learning_rate=learning_rate, L2_decay=0.01, decay_vars=decay_vars).minimize(loss)
-        #optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
+        # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+        optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
+                                        L2_decay=0.01,
+                                        decay_vars=decay_vars).minimize(loss)
+        # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
         # Expose symbols to class
@@ -202,11 +213,11 @@ class RNN_LM_Model:
         self.prediction = prediction
         self.correct_prediction = correct_prediction
 
-        tvars = tf.trainable_variables()
-        vsum = 0
-        for v in tvars:
-            vsum += np.product(v.get_shape().as_list())
-        print("learnable parameters:", vsum / 1024 / 1024, 'M', flush=True)
+        trainable_variables = tf.trainable_variables()
+        variables_total = 0
+        for v in trainable_variables:
+            variables_total += np.product(v.get_shape().as_list())
+        print("Learnable parameters:", variables_total / 1000 / 1000, 'M', flush=True)  # Some divide it by 1024 twice
 
         print("\nGraph Built...\n")
 
@@ -254,10 +265,13 @@ class RNN_LM_Model:
                     # Now we have batch of integers to look in text from
                     x_batch, y_batch = get_input_data_from_indexes(train_data, x_batch, window_size)
 
-
-                    if i % 10 == 0:
+                    if i % log_after_this_many_steps == 0:
                         s, _, l, p, b, a = sess.run([merged_summary,
-                                                     self.optimizer, self.loss, self.perplexity, self.bpc, self.accuracy],
+                                                     self.optimizer,
+                                                     self.loss,
+                                                     self.perplexity,
+                                                     self.bpc,
+                                                     self.accuracy],
                                                     feed_dict={self.x: x_batch,
                                                                self.y: y_batch,
                                                                self.output_drop_prob: 1 - output_keep_prob})
@@ -265,9 +279,9 @@ class RNN_LM_Model:
                         train_writer.add_summary(s, i + epoch * num_batches)
                     else:
                         _, l, p, b, a = sess.run([self.optimizer, self.loss, self.perplexity, self.bpc, self.accuracy],
-                                                    feed_dict={self.x: x_batch,
-                                                               self.y: y_batch,
-                                                               self.output_drop_prob: 1 - output_keep_prob})
+                                                 feed_dict={self.x: x_batch,
+                                                            self.y: y_batch,
+                                                            self.output_drop_prob: 1 - output_keep_prob})
 
                     total_loss += l
                     if i == 0:
@@ -279,11 +293,13 @@ class RNN_LM_Model:
                         total_bpc = (total_bpc * i + b) / (i + 1)
                         total_perplexity = (total_perplexity * i + p) / (i + 1)
 
-                    if i > 0 and ((i + 1) % 100 == 0 or i == num_batches - 1):
-                        # train_writer.add_summary(s, i + epoch * num_batches)
-                        print(f"Step {i + 1} of {num_batches} | Loss: {l}, Perplexity: {p}, BPC: {b}, Accuracy: {a}, TimeFromStart: {time.time() - start_time}")
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                            or i == num_batches - 1:
+                        print(f"Step {i + 1} of {num_batches} | Loss: {l}, Perplexity: {p}, BPC: {b}, Accuracy: {a},"
+                              f" TimeFromStart: {time.time() - start_time}")
 
-                print(f"   Epoch {epoch + 1} | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
+                print(f"   Epoch {epoch + 1} | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc},"
+                      f" Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
                 epoch_accuracy_summary = tf.Summary()
                 epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=total_accuracy)
@@ -331,9 +347,15 @@ class RNN_LM_Model:
                             total_val_bpc = (total_val_bpc * i + b) / (i + 1)
                             total_val_perplexity = (total_val_perplexity * i + p) / (i + 1)
 
-                        if i > 0 and ((i + 1) % 100 == 0 or i == num_validation_batches - 1):
-                            print(f"Step {i + 1} of {num_validation_batches} | Loss: {total_val_loss}, Perplexity: {total_val_perplexity}, BPC: {total_val_bpc}, Accuracy: {total_val_accuracy}, TimeFromStart: {time.time() - start_time}")
-                    print(f"Final validation stats | Loss: {total_val_loss}, Perplexity: {total_val_perplexity}, BPC: {total_val_bpc}, Accuracy: {total_val_accuracy}, TimeSpent: {time.time() - start_time}")
+                        if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                                or i == num_validation_batches - 1:
+                            print(f"Step {i + 1} of {num_validation_batches} | Loss: {total_val_loss},"
+                                  f" Perplexity: {total_val_perplexity}, BPC: {total_val_bpc},"
+                                  f" Accuracy: {total_val_accuracy}, TimeFromStart: {time.time() - start_time}")
+
+                    print(f"Final validation stats | Loss: {total_val_loss}, Perplexity: {total_val_perplexity},"
+                          f" BPC: {total_val_bpc}, Accuracy: {total_val_accuracy},"
+                          f" TimeSpent: {time.time() - start_time}")
 
                     epoch_accuracy_summary = tf.Summary()
                     epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=total_val_accuracy)
@@ -347,7 +369,8 @@ class RNN_LM_Model:
                     '''Here the training and validation epoch have been run, now get the lowest validation bpc model'''
                     # Check if validation perplexity was better
                     if best_validation_bpc is None or total_val_bpc < best_validation_bpc:
-                        print(f"&&& New best validation bpc - before: {best_validation_bpc}; after: {total_val_bpc} - saving model...")
+                        print(f"&&& New best validation bpc - before: {best_validation_bpc};"
+                              f" after: {total_val_bpc} - saving model...")
 
                         best_validation_bpc = total_val_bpc
 
@@ -358,7 +381,10 @@ class RNN_LM_Model:
                         epochs_no_gain = 0
                     elif break_epochs_no_gain >= 1:  # Validation BPC was worse. Check if break_epochs_no_gain is on
                         epochs_no_gain += 1
-                        print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs, breaking at {break_epochs_no_gain} epochs.")
+
+                        print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs,"
+                              f" breaking at {break_epochs_no_gain} epochs.")
+
                         if epochs_no_gain == break_epochs_no_gain:
                             print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
                             break  # Probably return would do the same thing (for now)
@@ -414,9 +440,12 @@ class RNN_LM_Model:
                     total_bpc = (total_bpc * i + b) / (i + 1)
                     total_perplexity = (total_perplexity * i + p) / (i + 1)
 
-                if i > 0 and ((i + 1) % 100 == 0 or i == num_batches - 1):
-                    print(f"Step {i + 1} of {num_batches} | Loss: {total_loss}, Perplexity: {total_perplexity} BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
-            print(f"Final testing stats | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
+                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                        or i == num_batches - 1:
+                    print(f"Step {i + 1} of {num_batches} | Loss: {total_loss}, Perplexity: {total_perplexity},"
+                          f" BPC: {total_bpc}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
+            print(f"Final testing stats | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc},"
+                  f" Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
 
 def find_optimal_hidden_units():
@@ -437,17 +466,19 @@ def find_optimal_hidden_units():
     def calculate_num_params_given_hidden_units(units):
         global hidden_units
         hidden_units = units
-        test_model = RNN_LM_Model()
 
-        # Get the number of paramaters in the current model
+        # Before we used "test_model = RNNLMModel()" and in the end "del test_model", but it doesn't seem to help, but
+        # If some time later you get some memory error, you can probably try this
+
+        RNNLMModel()
+
+        # Get the number of parameters in the current model
         trainable_variables = tf.trainable_variables()
         variable_count = 0
         for variable in trainable_variables:
             variable_count += np.product(variable.get_shape().as_list())
 
-        # These don't seem to be necessary, but they might help if there are some problems with memory
-        tf.keras.backend.clear_session()
-        del test_model
+        tf.keras.backend.clear_session()  # This is necessary, so there isn't any excess stuff left
 
         return variable_count
 
@@ -493,16 +524,16 @@ def find_optimal_hidden_units():
 if __name__ == '__main__':  # Main function
     TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
-    # To see how it trains in small amounts
-    '''
-    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 20]
+    # To see how it trains in small amounts (If it's usually 90%/5%/5% split, now it's 1%/1%/1% split)
+    # '''
+    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 90]
     VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]
     TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
-    '''
+    # '''
 
     hidden_units = find_optimal_hidden_units()
 
-    model = RNN_LM_Model()  # Create the model
+    model = RNNLMModel()  # Create the model
 
     model.fit(TRAIN_DATA, VALID_DATA)  # Train the model (validating after each epoch)
 
