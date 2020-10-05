@@ -35,9 +35,9 @@ def inv_sigmoid(y):
     return np.log(y / (1 - y))
 
 
-#residual_weight = 0.95  # r
-#candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
-#S_initial_value = inv_sigmoid(residual_weight)
+# residual_weight = 0.95  # r
+# candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
+# S_initial_value = inv_sigmoid(residual_weight)
 
 
 class RRUCell(LayerRNNCell):
@@ -73,8 +73,8 @@ class RRUCell(LayerRNNCell):
                  group_size=32,
                  activation=None,
                  reuse=None,
-                 dropout_rate = 0.0,
-                 residual_weight_initial_value = 0.95,  # in range (0 - 1]
+                 dropout_rate=0.1,
+                 residual_weight_initial_value=0.95,  # in range (0 - 1]
                  name=None,
                  dtype=None,
                  **kwargs):
@@ -144,7 +144,7 @@ class RRUCell(LayerRNNCell):
             initializer=tf.zeros_initializer())
 
         self.prev_state_weight = self.add_variable(  # TODO: check if needed
-            "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
+            "prev_state_weight/%s" % _BIAS_VARIABLE_NAME,
             shape=(),
             initializer=tf.ones_initializer())
 
@@ -187,8 +187,8 @@ class RRUCell(LayerRNNCell):
         gate = tf.sigmoid(gate+1)
 
         # Merge upper and lower parts
-        #final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
-        #final = state * self.S_bias + after_w * self._W_mul#*np.sqrt(1.0/200)
+        # final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
+        # final = state * self.S_bias + after_w * self._W_mul#*np.sqrt(1.0/200)
         final = state*gate+after_w*(1-gate)
 
         return final, final
@@ -234,8 +234,8 @@ def gelu(x):
 
 
 def group_norm(cur, group_size):
-    shape = tf.shape(cur) # runtime shape
-    n_units = cur.get_shape().as_list()[-1] # static shape
+    shape = tf.shape(cur)  # runtime shape
+    n_units = cur.get_shape().as_list()[-1]  # static shape
     n_groups = n_units//group_size
     assert group_size*n_groups == n_units
     cur = tf.reshape(cur, [-1]+[n_groups]+[group_size])

@@ -22,16 +22,50 @@ from lm_efficient_utils import get_input_data_from_indexes
 # from RAdam import RAdamOptimizer
 from adam_decay import AdamOptimizer_decay
 
-# Importing competitor cells
-from tiled_lstm import TiledLSTMCell  # Comment this out and you don't have to have dm-sonnet, etc. installed
-from BasicLSTMCell import BasicLSTMCell
-from GRUCell import GRUCell
+# Choose your cell
+cell_name = "MogrifierLSTM"  # Here you type in the name of the cell you want to use
 
-# Importing different versions of our cell (Uncomment the one you want to use)
-# from RRUCell import RRUCell
-from GatedRRUCell import RRUCell, gelu
-# from GatedRRUCell_a import RRUCell, gelu  # (This currently is the best version)
-# from GatedRRUCell2 import RRUCell
+# Maybe we can put these in a separate file called cells.py or something, and import it
+output_size = None
+if cell_name == "RRU1":  # ReZero version
+    from RRUCell import RRUCell
+    cell_fn = RRUCell
+    output_size = 256
+    model_name = 'rru_model'
+
+elif cell_name == "RRU2":  # Gated version with 1 transformation
+    from GatedRRUCell import RRUCell  # (I already have some results with this one)
+    cell_fn = RRUCell
+    model_name = 'grru1_model'
+
+elif cell_name == "RRU3":  # Gated version with 2 transformations
+    from GatedRRUCell2 import RRUCell
+    cell_fn = RRUCell
+    model_name = 'grru2_model'
+
+elif cell_name == "RRU4":  # Gated version with separate output size
+    from GatedRRUCell_a import RRUCell
+    cell_fn = RRUCell
+    output_size = 256
+    model_name = "grrua_model"  # We have hopes for this one
+
+elif cell_name == "GRU":
+    from GRUCell import GRUCell
+    cell_fn = GRUCell
+    model_name = 'gru_model'
+
+elif cell_name == "LSTM":
+    from BasicLSTMCell import BasicLSTMCell
+    cell_fn = BasicLSTMCell
+    model_name = 'lstm_model'
+
+elif cell_name == "MogrifierLSTM":  # Comment this out and you don't have to have dm-sonnet, etc. installed
+    from tiled_lstm import TiledLSTMCell
+    cell_fn = TiledLSTMCell
+    model_name = 'mogrifier_lstm_model'
+
+else:
+    raise ValueError(f"No such cell ('{cell_name}') has been implemented!")
 
 # Hyperparameters
 data_set_name = "enwik8"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
@@ -44,9 +78,8 @@ break_epochs_no_gain = 3  # If validation BPC doesn't get lower, after how many 
 hidden_units = 1024  # This will only be used if the number_of_parameters is None or < 1
 number_of_parameters = 48000000  # 48 million learnable parameters
 embedding_size = 128
-output_size = None  # 256 for GatedRRUCell_a, None for every other version that doesn't specify this variable
 learning_rate = 0.0005  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
-output_keep_prob = 0.9  # We pass this to our RRU cell, if it's in the training mode
+zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -57,14 +90,6 @@ assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_thi
 # After how many steps should we print the results of training/validating/testing (0 – don't print until the last step)
 print_after_this_many_steps = 1
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
-
-# Uncomment the corresponding model name for the cell you are using
-# model_name = 'lstm_model'  # BasicLSTMCell.py
-model_name = 'gru_model'  # GRUCell.py
-# model_name = 'rru_model'  # RRUCell.py
-# model_name = 'grru1_model'  # GatedRRUCell.py (This currently is the best version)
-# model_name = 'grru2_model'  # GatedRRUCell2.py
-# model_name = 'mogrifier_lstm_model'  # tiled_lstm.py
 
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
 output_path = log_path + model_name + '/enwik8/' + current_time
@@ -84,8 +109,7 @@ class RNNLMModel:
         # Labels for word prediction
         y = tf.placeholder(tf.int64, shape=[None, window_size], name="y")
 
-        # Output drop probability so we can pass different values depending on training/validating/testing
-        output_drop_prob = tf.placeholder(tf.float32, name='output_drop_prob')
+        # Can we add some dynamic placeholders so they can define their cell extra placeholders at the top of the page?
 
         # Instantiate our embedding matrix
         embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0), name="word_embedding")
@@ -93,18 +117,12 @@ class RNNLMModel:
         # Lookup embeddings
         embed_lookup = tf.nn.embedding_lookup(embedding, x)
 
-        # Create RNN cell (RRU/GRU/LSTM/MogrifierLSTM)
-        # For RRU versions that doesn't have a specific output size (GatedRRUCell.py, for example)
-        cell = RRUCell(hidden_units, dropout_rate=output_drop_prob)
-        # For RRU versions that does have a specific output size (GatedRRUCell_a.py, for example)
-        # cell = RRUCell(hidden_units, dropout_rate=output_drop_prob, output_size=output_size)
-        # Competitor cells
-        # cell = GRUCell(hidden_units)
-        # cell = BasicLSTMCell(hidden_units)
-        # cell = TiledLSTMCell(hidden_units, feature_mask_rank=79, feature_mask_rounds=6)
+        # Create the RNN cell, corresponding to the one you chose, for example, RRU, GRU, LSTM, MogrifierLSTM
+        # cell = cell_fn(hidden_units, training=training)  # Testing
+        cell = cell_fn(hidden_units)
 
-        # Our GatedRRUCell_a uses output size that differs from the hidden_size, but not all RNN cells does this. And
-        # if the cell doesn't use a different output_size, we need to make it as hidden units for the program to work.
+        # Some cells use output size that differs from the hidden_size. And if the cell doesn't use a different
+        # output_size, we need to make it as hidden units for the program to work.
         final_size = output_size
         if final_size is None:
             final_size = hidden_units
@@ -113,9 +131,19 @@ class RNNLMModel:
         current_batch_size = tf.shape(x)[0]
 
         # Create the initial state of zeros
+        # $ Great way
         initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
+        #
+        # $ I don't think we need these bottom two lines anymore
         # initial_state += np.asarray([1.0, -1.0] * (initial_state.get_shape().as_list()[-1] // 2)) * 0.1
         # initial_state += 0.1
+        #
+        # $ We need something else, if we want to pass it last values through the feed dict
+        # initial_state = tf.placeholder(tf.float32, shape=[2, None, None], name="initial_state")
+        '''first_batch = tf.placeholder(tf.bool, name="first_batch")
+        is_this_the_first_batch = first_batch
+        if np.random.uniform() < zero_state_chance or is_this_the_first_batch:
+            initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)'''
 
         # Wrap our cell in a dropout wrapper
         # cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
@@ -202,9 +230,10 @@ class RNNLMModel:
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
         # Expose symbols to class
+        # Placeholders
         self.x = x
         self.y = y
-        self.output_drop_prob = output_drop_prob
+        # Information you can get from this graph
         self.loss = loss
         self.perplexity = perplexity
         self.bpc = bpc
@@ -248,7 +277,8 @@ class RNNLMModel:
             for epoch in range(num_epochs):
                 print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
 
-                indexes = shuffle(indexes)
+                # indexes = shuffle(indexes)  # If we plan to run this more dynamically (infinite or really large
+                # context), then we can't shuffle
 
                 total_loss = 0
                 total_accuracy = 0
@@ -257,31 +287,39 @@ class RNNLMModel:
 
                 start_time = time.time()
 
+                # state = None
+
                 for i in range(num_batches):
                     if i != num_batches - 1:
                         x_batch = indexes[i * batch_size: i * batch_size + batch_size]
                     else:
                         x_batch = indexes[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
+
+                    #if i == 0:
+                        #state = np.zeros(2, (len(x_batch), hidden_units))
+
                     # Now we have batch of integers to look in text from
                     x_batch, y_batch = get_input_data_from_indexes(train_data, x_batch, window_size)
 
-                    if i % log_after_this_many_steps == 0:
+                    if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
                         s, _, l, p, b, a = sess.run([merged_summary,
-                                                     self.optimizer,
-                                                     self.loss,
-                                                     self.perplexity,
-                                                     self.bpc,
-                                                     self.accuracy],
-                                                    feed_dict={self.x: x_batch,
-                                                               self.y: y_batch,
-                                                               self.output_drop_prob: 1 - output_keep_prob})
+                                                                 self.optimizer,
+                                                                 self.loss,
+                                                                 self.perplexity,
+                                                                 self.bpc,
+                                                                 self.accuracy],
+                                                                feed_dict={self.x: x_batch,
+                                                                           self.y: y_batch})
 
                         train_writer.add_summary(s, i + epoch * num_batches)
                     else:
-                        _, l, p, b, a = sess.run([self.optimizer, self.loss, self.perplexity, self.bpc, self.accuracy],
-                                                 feed_dict={self.x: x_batch,
-                                                            self.y: y_batch,
-                                                            self.output_drop_prob: 1 - output_keep_prob})
+                        _, l, p, b, a = sess.run([self.optimizer,
+                                                              self.loss,
+                                                              self.perplexity,
+                                                              self.bpc,
+                                                              self.accuracy],
+                                                             feed_dict={self.x: x_batch,
+                                                                        self.y: y_batch})
 
                     total_loss += l
                     if i == 0:
@@ -335,8 +373,7 @@ class RNNLMModel:
 
                         l, p, b, a = sess.run([self.loss, self.perplexity, self.bpc, self.accuracy],
                                               feed_dict={self.x: x_batch,
-                                                         self.y: y_batch,
-                                                         self.output_drop_prob: 0.})
+                                                         self.y: y_batch})
                         total_val_loss += l
                         if i == 0:
                             total_val_accuracy = a
@@ -428,8 +465,7 @@ class RNNLMModel:
 
                 l, p, b, a = sess.run([self.loss, self.perplexity, self.bpc, self.accuracy],
                                       feed_dict={self.x: x_batch,
-                                                 self.y: y_batch,
-                                                 self.output_drop_prob: 0.})
+                                                 self.y: y_batch})
                 total_loss += l
                 if i == 0:
                     total_accuracy = a
@@ -521,10 +557,14 @@ def find_optimal_hidden_units():
     return find_answer(previous_hidden_size, hidden_size)
 
 
+def gelu(x):
+    return x * tf.sigmoid(1.702 * x)
+
+
 if __name__ == '__main__':  # Main function
     TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
-    # To see how it trains in small amounts (If it's usually 90%/5%/5% split, now it's 1%/1%/1% split)
+    # To see how it trains in small amounts (If it's usually in a 90%/5%/5% split, now it's in a 1%/1%/1% split)
     # '''
     TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 90]
     VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]

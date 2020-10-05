@@ -35,9 +35,9 @@ def inv_sigmoid(y):
     return np.log(y / (1 - y))
 
 
-#residual_weight = 0.95  # r
-#candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
-#S_initial_value = inv_sigmoid(residual_weight)
+# residual_weight = 0.95  # r
+# candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
+# S_initial_value = inv_sigmoid(residual_weight)
 
 
 class RRUCell(LayerRNNCell):
@@ -70,12 +70,12 @@ class RRUCell(LayerRNNCell):
 
     def __init__(self,
                  num_units,
-                 output_size,
+                 output_size=256,
                  group_size=32,
                  activation=None,
                  reuse=None,
-                 dropout_rate = 0.0,
-                 residual_weight_initial_value = 0.95,  # in range (0 - 1]
+                 dropout_rate=0.1,
+                 residual_weight_initial_value=0.95,  # in range (0 - 1]
                  name=None,
                  dtype=None,
                  **kwargs):
@@ -118,7 +118,7 @@ class RRUCell(LayerRNNCell):
         _check_supported_dtypes(self.dtype)
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
-        n_middle_maps = 2 * total # TODO find the optimal value
+        n_middle_maps = 2 * total  # TODO find the optimal value
         self._Z_kernel = self.add_variable(
             "Z/%s" % _WEIGHTS_VARIABLE_NAME,
             shape=[total, n_middle_maps],
@@ -130,7 +130,7 @@ class RRUCell(LayerRNNCell):
         self.S_bias_variable = self.add_variable(
             "S/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
-            initializer = init_ops.constant_initializer(inv_sigmoid(self.residual_weight_initial_value / 1.5), dtype=self.dtype))
+            initializer=init_ops.constant_initializer(inv_sigmoid(self.residual_weight_initial_value / 1.5), dtype=self.dtype))
         self.S_bias = tf.sigmoid(self.S_bias_variable)*1.5
         self._W_kernel = self.add_variable(
             "W/%s" % _WEIGHTS_VARIABLE_NAME,
@@ -141,11 +141,11 @@ class RRUCell(LayerRNNCell):
             shape=[self._num_units+self._output_size],
             initializer=self._bias_initializer)
         self._W_mul = self.add_variable(
-            "W_smul/%s"% _BIAS_VARIABLE_NAME,
+            "W_smul/%s" % _BIAS_VARIABLE_NAME,
             shape=(),
             initializer=tf.zeros_initializer())
 
-        # self.prev_state_weight = self.add_variable( #todo: check if needed
+        # self.prev_state_weight = self.add_variable(  # todo: check if needed
         #     "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
         #     shape=(),
         #     initializer=tf.ones_initializer())
@@ -158,7 +158,7 @@ class RRUCell(LayerRNNCell):
 
         # LOWER PART OF THE CELL
         # Concatenate input and last state
-        #state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
+        # state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
         state_drop = state
         input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
 
@@ -182,14 +182,13 @@ class RRUCell(LayerRNNCell):
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
-        #after_w -= tf.reduce_mean(after_w, axis=-1, keepdims=True)
+        # after_w -= tf.reduce_mean(after_w, axis=-1, keepdims=True)
         candidate = after_w[:,0:self._num_units]
         output = after_w[:, self._num_units:]
 
-
         # Merge upper and lower parts
-        #final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
-        final = state * self.S_bias + candidate * self._W_mul#*np.sqrt(1.0/200)
+        # final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
+        final = state * self.S_bias + candidate * self._W_mul  # * np.sqrt(1.0/200)
 
         return output, final
 
@@ -239,8 +238,8 @@ def gelu(x):
 
 
 def group_norm(cur, group_size):
-    shape = tf.shape(cur) # runtime shape
-    n_units = cur.get_shape().as_list()[-1] # static shape
+    shape = tf.shape(cur)  # runtime shape
+    n_units = cur.get_shape().as_list()[-1]  # static shape
     n_groups = n_units//group_size
     assert group_size*n_groups == n_units
     cur = tf.reshape(cur, [-1]+[n_groups]+[group_size])

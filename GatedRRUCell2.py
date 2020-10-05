@@ -73,8 +73,8 @@ class RRUCell(LayerRNNCell):
                  group_size=32,
                  activation=None,
                  reuse=None,
-                 dropout_rate = 0.0,
-                 residual_weight_initial_value = 0.95,  # in range (0 - 1]
+                 dropout_rate=0.1,
+                 residual_weight_initial_value=0.95,  # in range (0 - 1]
                  name=None,
                  dtype=None,
                  **kwargs):
