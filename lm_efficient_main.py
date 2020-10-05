@@ -80,6 +80,7 @@ number_of_parameters = 48000000  # 48 million learnable parameters
 embedding_size = 128
 learning_rate = 0.0005  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
 zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
+number_of_layers = 2
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -119,7 +120,14 @@ class RNNLMModel:
 
         # Create the RNN cell, corresponding to the one you chose, for example, RRU, GRU, LSTM, MogrifierLSTM
         # cell = cell_fn(hidden_units, training=training)  # Testing
-        cell = cell_fn(hidden_units)
+        # Old 1 layer way
+        # cell = cell_fn(hidden_units)
+        # New 1+ layer way
+        cells = []
+        for _ in range(number_of_layers):
+            cell = cell_fn(hidden_units)
+            cells.append(cell)
+        cell = tf.contrib.rnn.MultiRNNCell(cells)
 
         # Some cells use output size that differs from the hidden_size. And if the cell doesn't use a different
         # output_size, we need to make it as hidden units for the program to work.
