@@ -18,7 +18,12 @@ b) Run the installer
 bash Anaconda3-2020.07-Linux-x86_64.sh
 ```
 
-c) Refresh the shell, so you can use conda command
+c) Set path:
+```
+export PATH=~/anaconda3/bin:$PATH
+```
+
+d) Refresh the shell, so you can use conda command
 ```
 source .bashrc
 ```

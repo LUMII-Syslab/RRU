@@ -26,7 +26,8 @@ from adam_decay import AdamOptimizer_decay
 cell_name = "MogrifierLSTM"  # Here you type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
-output_size = None
+output_size = None  # Most cells don't have an output size, so we defaultly put it as None
+state_is_tuple = False  # So we can make the RNN cell stateful even for LSTM based cells such as LSTM and MogrifierLSTM
 if cell_name == "RRU1":  # ReZero version
     from RRUCell import RRUCell
     cell_fn = RRUCell
@@ -57,30 +58,38 @@ elif cell_name == "GRU":
 elif cell_name == "LSTM":
     from BasicLSTMCell import BasicLSTMCell
     cell_fn = BasicLSTMCell
+    state_is_tuple = True
     model_name = 'lstm_model'
 
 elif cell_name == "MogrifierLSTM":  # Comment this out and you don't have to have dm-sonnet, etc. installed
     from tiled_lstm import TiledLSTMCell
     cell_fn = TiledLSTMCell
+    state_is_tuple = True
     model_name = 'mogrifier_lstm_model'
 
 else:
     raise ValueError(f"No such cell ('{cell_name}') has been implemented!")
 
 # Hyperparameters
+# Data parameters
 data_set_name = "enwik8"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
 window_size = 512  # Enwik8 – 512. Text8 512?, PTB word-level 70?, PTB character-level 150?
 step_size = window_size // 2
 batch_size = 64  # Enwik8 – 64. PTB character-level 128?
+fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
+continuous_batches = True  # Batches go continuously, this might give performance boost with a stateful RNN cell
+shuffle_data = False  # Should we shuffle the samples?
+# Training
 num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 break_epochs_no_gain = 3  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
 hidden_units = 1024  # This will only be used if the number_of_parameters is None or < 1
-number_of_parameters = 48000000  # 48 million learnable parameters
+number_of_parameters = 24000000  # 24 million learnable parameters
 embedding_size = 128
 learning_rate = 0.0005  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
-zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
 number_of_layers = 2
+stateful = True  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
+zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -138,20 +147,25 @@ class RNNLMModel:
         # Extract the batch size - this allows for variable batch size
         current_batch_size = tf.shape(x)[0]
 
-        # Create the initial state of zeros
-        # $ Great way
-        initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
-        #
-        # $ I don't think we need these bottom two lines anymore
-        # initial_state += np.asarray([1.0, -1.0] * (initial_state.get_shape().as_list()[-1] // 2)) * 0.1
-        # initial_state += 0.1
-        #
-        # $ We need something else, if we want to pass it last values through the feed dict
-        # initial_state = tf.placeholder(tf.float32, shape=[2, None, None], name="initial_state")
-        '''first_batch = tf.placeholder(tf.bool, name="first_batch")
-        is_this_the_first_batch = first_batch
-        if np.random.uniform() < zero_state_chance or is_this_the_first_batch:
-            initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)'''
+        if stateful:
+            # Magic here
+            if state_is_tuple:  # LSTMs and such
+                initial_state = tf.placeholder(tf.float32, shape=[number_of_layers, 2, None, hidden_units], name="initial_state")
+                initial_state = tf.unstack(initial_state, axis=0)
+                initial_state = tuple(
+                    [tf.nn.rnn_cell.LSTMStateTuple(initial_state[idx][0], initial_state[idx][1])
+                     for idx in range(number_of_layers)]
+                )
+            else:  # Regular shaped RRN cells
+                initial_state = tf.placeholder(tf.float32, shape=[number_of_layers, None, hidden_units], name="initial_state")
+                initial_state = tuple(tf.unstack(initial_state, axis=0))
+        else:
+            # Create the initial state of zeros
+            initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
+            #
+            # I don't think we need these bottom two lines anymore
+            # initial_state += np.asarray([1.0, -1.0] * (initial_state.get_shape().as_list()[-1] // 2)) * 0.1
+            # initial_state += 0.1
 
         # Wrap our cell in a dropout wrapper
         # cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
@@ -241,7 +255,9 @@ class RNNLMModel:
         # Placeholders
         self.x = x
         self.y = y
+        self.initial_state = initial_state
         # Information you can get from this graph
+        self.state = state
         self.loss = loss
         self.perplexity = perplexity
         self.bpc = bpc
@@ -274,7 +290,18 @@ class RNNLMModel:
             validation_writer = tf.summary.FileWriter(output_path + "/validation")
             validation_writer.add_graph(sess.graph)
 
-            indexes = get_window_indexes(len(train_data), window_size, step_size)
+            # When stateful and in other times, we want the data to be continuous, so we need them to be exactly
+            # one after the other
+
+            if stateful:  # Need to think about this later, but we need this so we can take the last state, so it
+                # doesn't have a different batch size. We can think about other ways to deal with this later
+                global fixed_batch_size
+                fixed_batch_size = True
+
+            if stateful or continuous_batches:
+                indexes = get_window_indexes(len(train_data), window_size, window_size)
+            else:
+                indexes = get_window_indexes(len(train_data), window_size, step_size)
 
             num_batches = len(indexes) // batch_size
 
@@ -285,8 +312,8 @@ class RNNLMModel:
             for epoch in range(num_epochs):
                 print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
 
-                # indexes = shuffle(indexes)  # If we plan to run this more dynamically (infinite or really large
-                # context), then we can't shuffle
+                if shuffle_data:
+                    indexes = shuffle(indexes)
 
                 total_loss = 0
                 total_accuracy = 0
@@ -295,39 +322,83 @@ class RNNLMModel:
 
                 start_time = time.time()
 
-                # state = None
+                # At first I wanted to get the zero state from this, but it won't work, because it's a tensor. I can
+                # make the user input the zero_state himself, though. We might be able to allow to input their own zero
+                # state version at the top of the page
+                # zero_state = cell_fn(hidden_units).zero_state(batch_size, dtype=tf.float32)
+                ''' Might have some small speed increase by doing something like this if you want perfect code :D
+                zero_state_fixed_single = np.zeros((batch_size, hidden_units))
+                zero_state_fixed = []
+                for i in range(number_of_layers):
+                    zero_state_fixed.append(zero_state_fixed_single)
+                '''
+
+                state = None
 
                 for i in range(num_batches):
-                    if i != num_batches - 1:
-                        x_batch = indexes[i * batch_size: i * batch_size + batch_size]
+                    if continuous_batches:
+                        x_batch = []
+                        if fixed_batch_size:
+                            for j in range(i, num_batches * batch_size, num_batches):
+                                x_batch.append(indexes[j])
+                        else:
+                            for j in range(i, len(indexes), num_batches):
+                                x_batch.append(indexes[j])
                     else:
-                        x_batch = indexes[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
+                        if fixed_batch_size or i != num_batches - 1:  # The batch_size is fixed or it's not the last
+                            x_batch = indexes[i * batch_size: i * batch_size + batch_size]
+                        else:
+                            # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
+                            x_batch = indexes[i * batch_size:]
 
-                    #if i == 0:
-                        #state = np.zeros(2, (len(x_batch), hidden_units))
+                    if stateful and (np.random.uniform() < zero_state_chance or i == 0):
+                        # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
+                        zero_state = np.zeros((len(x_batch), hidden_units))
+                        if state_is_tuple:
+                            state = []
+                            state.append(zero_state)
+                            state.append(zero_state)
+                            zero_state = state
+                        state = []
+                        for j in range(number_of_layers):
+                            state.append(zero_state)
 
                     # Now we have batch of integers to look in text from
                     x_batch, y_batch = get_input_data_from_indexes(train_data, x_batch, window_size)
 
+                    if stateful:
+                        feed_dict = {
+                            self.x: x_batch,
+                            self.y: y_batch,
+                            self.initial_state: state
+                        }
+                    else:
+                        feed_dict = {
+                            self.x: x_batch,
+                            self.y: y_batch,
+                        }
+
                     if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                        s, _, l, p, b, a = sess.run([merged_summary,
+                        s, _, last_state, l, p, b, a = sess.run([merged_summary,
                                                                  self.optimizer,
+                                                                 self.state,
                                                                  self.loss,
                                                                  self.perplexity,
                                                                  self.bpc,
                                                                  self.accuracy],
-                                                                feed_dict={self.x: x_batch,
-                                                                           self.y: y_batch})
+                                                                feed_dict=feed_dict)
 
                         train_writer.add_summary(s, i + epoch * num_batches)
                     else:
-                        _, l, p, b, a = sess.run([self.optimizer,
+                        _, last_state, l, p, b, a = sess.run([self.optimizer,
+                                                              self.state,
                                                               self.loss,
                                                               self.perplexity,
                                                               self.bpc,
                                                               self.accuracy],
-                                                             feed_dict={self.x: x_batch,
-                                                                        self.y: y_batch})
+                                                             feed_dict=feed_dict)
+
+                    state = last_state
 
                     total_loss += l
                     if i == 0:
@@ -573,11 +644,11 @@ if __name__ == '__main__':  # Main function
     TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
     # To see how it trains in small amounts (If it's usually in a 90%/5%/5% split, now it's in a 1%/1%/1% split)
-    # '''
+    '''
     TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 90]
     VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]
     TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
-    # '''
+    '''
 
     hidden_units = find_optimal_hidden_units()
 
