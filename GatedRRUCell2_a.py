@@ -74,8 +74,8 @@ class RRUCell(LayerRNNCell):
                  group_size=32,
                  activation=None,
                  reuse=None,
-                 dropout_rate=0.2,
-                 residual_weight_initial_value=0.95,  # in range (0 - 1]
+                 dropout_rate = 0.0,
+                 residual_weight_initial_value = 0.95,  # in range (0 - 1]
                  name=None,
                  dtype=None,
                  **kwargs):
@@ -90,8 +90,8 @@ class RRUCell(LayerRNNCell):
         # Inputs must be 2-dimensional.
         self.input_spec = input_spec.InputSpec(ndim=2)
 
-        self._output_size = output_size
         self._num_units = num_units
+        self._output_size = output_size
         if activation:
             self._activation = activations.get(activation)
         else:
@@ -119,7 +119,7 @@ class RRUCell(LayerRNNCell):
         _check_supported_dtypes(self.dtype)
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
-        n_middle_maps = 2 * total  # TODO: find the optimal value
+        n_middle_maps = 2 * total # TODO find the optimal value
         self._Z_kernel = self.add_variable(
             "Z/%s" % _WEIGHTS_VARIABLE_NAME,
             shape=[total, n_middle_maps],
@@ -128,6 +128,16 @@ class RRUCell(LayerRNNCell):
             "Z/%s" % _BIAS_VARIABLE_NAME,
             shape=[n_middle_maps],
             initializer=self._bias_initializer)
+        self._Z_kernel2 = self.add_variable(
+            "Z2/%s" % _WEIGHTS_VARIABLE_NAME,
+            shape=[n_middle_maps, n_middle_maps],
+            initializer=self._kernel_initializer)
+        self._Z_bias2 = self.add_variable(
+            "Z2/%s" % _BIAS_VARIABLE_NAME,
+            shape=[n_middle_maps],
+            initializer=self._bias_initializer)
+
+
         self.S_bias_variable = self.add_variable(
             "S/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
@@ -146,62 +156,44 @@ class RRUCell(LayerRNNCell):
             shape=(),
             initializer=tf.zeros_initializer())
 
-        # self.prev_state_weight = self.add_variable(  # TODO: check if needed
-        #     "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
-        #     shape=(),
-        #     initializer=tf.ones_initializer())
-        #
-        # self.candidate_weight = self.add_variable(  # TODO: check if needed
-        #     "cand_weight/%s"% _BIAS_VARIABLE_NAME,
-        #     shape=(),
-        #     initializer=tf.constant_initializer(1.0))
+        self.prev_state_weight = self.add_variable( #todo: check if needed
+            "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
+            shape=(),
+            initializer=tf.ones_initializer())
+
+        self.candidate_weight = self.add_variable(  # TODO: check if needed
+            "cand_weight/%s"% _BIAS_VARIABLE_NAME,
+            shape=(self._num_units),
+            initializer=tf.constant_initializer(0.25))
+
 
         self.built = True
 
     def call(self, inputs, state):
         """Residual recurrent unit (RRU) with nunits cells."""
         _check_rnn_cell_input_dtypes([inputs, state])
-        #inputs = instance_norm(inputs)
+
         # LOWER PART OF THE CELL
-        # Concatenate input and last state
-        # state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
         state_drop = state
         input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
-        #input_and_state = tf.nn.dropout(input_and_state, rate=self._dropout_rate)
 
-        # Go through first transformation – Z
+        # Go through first, Z transformation
         after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
-
-        # Do group normalization
-        # group_size = self._group_size
-        # # Do normalization
-        # if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
-        #     # Do instance normalization
-        #     after_norm = instance_norm(after_z)
-        # else:
-        #     # Do group normalization
-        #     after_norm = group_norm(after_z, group_size)
-
-        # Do instance normalization
-        after_norm = instance_norm(after_z)
+        after_norm = instance_norm(after_z)  # If you can't get upper part working
 
         # Do GELU activation
         after_gelu = gelu(after_norm)
-        after_gelu = tf.nn.dropout(after_gelu, rate=self._dropout_rate)
-        # Do ReLU activation
-        # after_gelu = tf.nn.relu(after_norm)
+        after_gelu = math_ops.matmul(after_gelu, self._Z_kernel2) + self._Z_bias2
+        #after_gelu = instance_norm(after_gelu)
+        after_gelu = gelu(after_gelu)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
-        #after_w, gate = tf.split(after_w, 2, axis=-1)
-        candidate = after_w[:,0:self._num_units]*0.25#*self.candidate_weight
+        candidate = after_w[:,0:self._num_units]*0.25
         gate = after_w[:, self._num_units:2*self._num_units]
         output = after_w[:, 2*self._num_units:]
         gate = tf.sigmoid(gate+1)
 
-        # Merge upper and lower parts
-        #final_state = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
-        #final_state = state * self.S_bias + after_w * self._W_mul#*np.sqrt(1.0/200)
         final_state = state*gate+candidate*(1-gate)
         #final_state = state * gate + candidate * tf.sqrt(1 - tf.square(gate) + 1e-8)
 
@@ -271,9 +263,3 @@ def instance_norm(cur):
     variance = tf.reduce_mean(tf.square(cur), [-1], keepdims=True)
     cur = cur * tf.rsqrt(variance + 1e-6)
     return cur
-
-# def softsign2(x):
-#     return (1 - 1 / tf.square(tf.abs(x/2)+1)) * tf.sign(x)
-#
-# def soft_sigmoid(x):
-#     return (softsign2(x) + 1) * 0.5
