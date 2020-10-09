@@ -74,8 +74,9 @@ class RRUCell(LayerRNNCell):
                  group_size=32,
                  activation=None,
                  reuse=None,
-                 dropout_rate = 0.0,
-                 residual_weight_initial_value = 0.95,  # in range (0 - 1]
+                 training=True,
+                 dropout_rate=0.0,
+                 residual_weight_initial_value=0.95,  # in range (0 - 1]
                  name=None,
                  dtype=None,
                  **kwargs):
@@ -99,6 +100,7 @@ class RRUCell(LayerRNNCell):
         self._kernel_initializer = None
         self._bias_initializer = tf.zeros_initializer()
         self._group_size = group_size
+        self._training = training
         self._dropout_rate = dropout_rate
         assert residual_weight_initial_value > 0 and residual_weight_initial_value <= 1
         self.residual_weight_initial_value = residual_weight_initial_value
@@ -172,6 +174,11 @@ class RRUCell(LayerRNNCell):
     def call(self, inputs, state):
         """Residual recurrent unit (RRU) with nunits cells."""
         _check_rnn_cell_input_dtypes([inputs, state])
+
+        if self._training:
+            dropout_rate = self._dropout_rate
+        else:
+            dropout_rate = 0.
 
         # LOWER PART OF THE CELL
         state_drop = state

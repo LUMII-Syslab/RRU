@@ -74,6 +74,7 @@ class RRUCell(LayerRNNCell):
                  group_size=32,
                  activation=None,
                  reuse=None,
+                 training=True,
                  dropout_rate=0.2,
                  residual_weight_initial_value=0.95,  # in range (0 - 1]
                  name=None,
@@ -99,6 +100,7 @@ class RRUCell(LayerRNNCell):
         self._kernel_initializer = None
         self._bias_initializer = tf.zeros_initializer()
         self._group_size = group_size
+        self._training = training
         self._dropout_rate = dropout_rate
         assert residual_weight_initial_value > 0 and residual_weight_initial_value <= 1
         self.residual_weight_initial_value = residual_weight_initial_value
@@ -161,13 +163,19 @@ class RRUCell(LayerRNNCell):
     def call(self, inputs, state):
         """Residual recurrent unit (RRU) with nunits cells."""
         _check_rnn_cell_input_dtypes([inputs, state])
+
+        if self._training:
+            dropout_rate = self._dropout_rate
+        else:
+            dropout_rate = 0.
+
         #inputs = instance_norm(inputs)
         # LOWER PART OF THE CELL
         # Concatenate input and last state
-        # state_drop = tf.nn.dropout(state, rate = self._dropout_rate)
+        # state_drop = tf.nn.dropout(state, rate = dropout_rate)
         state_drop = state
         input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
-        #input_and_state = tf.nn.dropout(input_and_state, rate=self._dropout_rate)
+        #input_and_state = tf.nn.dropout(input_and_state, rate=dropout_rate)
 
         # Go through first transformation – Z
         after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
@@ -187,7 +195,7 @@ class RRUCell(LayerRNNCell):
 
         # Do GELU activation
         after_gelu = gelu(after_norm)
-        after_gelu = tf.nn.dropout(after_gelu, rate=self._dropout_rate)
+        after_gelu = tf.nn.dropout(after_gelu, rate=dropout_rate)
         # Do ReLU activation
         # after_gelu = tf.nn.relu(after_norm)
 

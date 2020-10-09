@@ -23,30 +23,42 @@ from lm_efficient_utils import get_input_data_from_indexes
 from adam_decay import AdamOptimizer_decay
 
 # Choose your cell
-cell_name = "MogrifierLSTM"  # Here you type in the name of the cell you want to use
+cell_name = "RRU1"  # Here you type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we defaultly put it as None
 state_is_tuple = False  # So we can make the RNN cell stateful even for LSTM based cells such as LSTM and MogrifierLSTM
+has_training_bool = False
 if cell_name == "RRU1":  # ReZero version
     from RRUCell import RRUCell
     cell_fn = RRUCell
     output_size = 256
+    has_training_bool = True
     model_name = 'rru_model'
 
 elif cell_name == "RRU2":  # Gated version with 1 transformation
     from GatedRRUCell import RRUCell  # (I already have some results with this one)
     cell_fn = RRUCell
+    has_training_bool = True
     model_name = 'grru1_model'
 
 elif cell_name == "RRU3":  # Gated version with 2 transformations
     from GatedRRUCell2 import RRUCell
     cell_fn = RRUCell
+    has_training_bool = True
     model_name = 'grru2_model'
 
-elif cell_name == "RRU4":  # Gated version with separate output size
+elif cell_name == "RRU4":  # Gated version with 2 transformations and a separate output size
+    from GatedRRUCell2_a import RRUCell
+    cell_fn = RRUCell
+    has_training_bool = True
+    output_size = 256
+    model_name = 'grru2a_model'
+
+elif cell_name == "RRU5":  # Gated version with separate output size
     from GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
+    has_training_bool = True
     output_size = 256
     model_name = "grrua_model"  # We have hopes for this one
 
@@ -119,7 +131,8 @@ class RNNLMModel:
         # Labels for word prediction
         y = tf.placeholder(tf.int64, shape=[None, window_size], name="y")
 
-        # Can we add some dynamic placeholders so they can define their cell extra placeholders at the top of the page?
+        # Bool value if we are in training or not
+        training = tf.placeholder(tf.bool, name='training')
 
         # Instantiate our embedding matrix
         embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0), name="word_embedding")
@@ -134,7 +147,10 @@ class RNNLMModel:
         # New 1+ layer way
         cells = []
         for _ in range(number_of_layers):
-            cell = cell_fn(hidden_units)
+            if has_training_bool:
+                cell = cell_fn(hidden_units, training=training)
+            else:
+                cell = cell_fn(hidden_units)
             cells.append(cell)
         cell = tf.contrib.rnn.MultiRNNCell(cells)
 
@@ -255,7 +271,9 @@ class RNNLMModel:
         # Placeholders
         self.x = x
         self.y = y
-        self.initial_state = initial_state
+        self.training = training
+        if stateful:
+            self.initial_state = initial_state
         # Information you can get from this graph
         self.state = state
         self.loss = loss
@@ -370,12 +388,14 @@ class RNNLMModel:
                         feed_dict = {
                             self.x: x_batch,
                             self.y: y_batch,
+                            self.training: True,
                             self.initial_state: state
                         }
                     else:
                         feed_dict = {
                             self.x: x_batch,
                             self.y: y_batch,
+                            self.training: True
                         }
 
                     if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
@@ -429,8 +449,10 @@ class RNNLMModel:
                 if valid_data is not None:
                     print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
 
-                    # I think we need to validate and test with step_size = step_size, right? maybe 1
-                    validation_indexes = get_window_indexes(len(valid_data), window_size, step_size)
+                    if stateful or continuous_batches:
+                        validation_indexes = get_window_indexes(len(valid_data), window_size, window_size)
+                    else:
+                        validation_indexes = get_window_indexes(len(valid_data), window_size, step_size)
 
                     num_validation_batches = len(validation_indexes) // batch_size
 
@@ -442,17 +464,56 @@ class RNNLMModel:
                     start_time = time.time()
 
                     for i in range(num_validation_batches):
-                        if i != num_validation_batches - 1:
-                            x_batch = validation_indexes[i * batch_size: i * batch_size + batch_size]
+
+                        if continuous_batches:
+                            x_batch = []
+                            if fixed_batch_size:
+                                for j in range(i, num_validation_batches * batch_size, num_validation_batches):
+                                    x_batch.append(validation_indexes[j])
+                            else:
+                                for j in range(i, len(validation_indexes), num_validation_batches):
+                                    x_batch.append(validation_indexes[j])
                         else:
-                            # Run the remaining sequences (that aren't full batch_size)
-                            x_batch = validation_indexes[i * batch_size:]
+                            if fixed_batch_size or i != num_validation_batches - 1:  # The batch_size is fixed or it's not the last
+                                x_batch = validation_indexes[i * batch_size: i * batch_size + batch_size]
+                            else:
+                                # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
+                                x_batch = validation_indexes[i * batch_size:]
+
+                        if stateful and (np.random.uniform() < zero_state_chance or i == 0):
+                            # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
+                            zero_state = np.zeros((len(x_batch), hidden_units))
+                            if state_is_tuple:
+                                state = []
+                                state.append(zero_state)
+                                state.append(zero_state)
+                                zero_state = state
+                            state = []
+                            for j in range(number_of_layers):
+                                state.append(zero_state)
+
                         # Now we have batch of integers to look in text from
                         x_batch, y_batch = get_input_data_from_indexes(valid_data, x_batch, window_size)
 
-                        l, p, b, a = sess.run([self.loss, self.perplexity, self.bpc, self.accuracy],
-                                              feed_dict={self.x: x_batch,
-                                                         self.y: y_batch})
+                        if stateful:
+                            feed_dict = {
+                                self.x: x_batch,
+                                self.y: y_batch,
+                                self.training: False,
+                                self.initial_state: state
+                            }
+                        else:
+                            feed_dict = {
+                                self.x: x_batch,
+                                self.y: y_batch,
+                                self.training: False
+                            }
+
+                        last_state, l, p, b, a = sess.run([self.state, self.loss, self.perplexity, self.bpc, self.accuracy],
+                                              feed_dict=feed_dict)
+
+                        state = last_state
+
                         total_val_loss += l
                         if i == 0:
                             total_val_accuracy = a
@@ -516,7 +577,10 @@ class RNNLMModel:
 
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-            indexes = get_window_indexes(len(data), window_size, step_size)
+            if stateful or continuous_batches:
+                indexes = get_window_indexes(len(data), window_size, window_size)
+            else:
+                indexes = get_window_indexes(len(data), window_size, step_size)
 
             # Restore session
             ckpt = tf.train.get_checkpoint_state(ckpt_path)
@@ -534,17 +598,59 @@ class RNNLMModel:
 
             start_time = time.time()
 
+            state = None
+
             for i in range(num_batches):
-                if i != num_batches - 1:
-                    x_batch = indexes[i * batch_size: i * batch_size + batch_size]
+
+                if continuous_batches:
+                    x_batch = []
+                    if fixed_batch_size:
+                        for j in range(i, num_batches * batch_size, num_batches):
+                            x_batch.append(indexes[j])
+                    else:
+                        for j in range(i, len(indexes), num_batches):
+                            x_batch.append(indexes[j])
                 else:
-                    x_batch = indexes[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
+                    if fixed_batch_size or i != num_batches - 1:  # The batch_size is fixed or it's not the last
+                        x_batch = indexes[i * batch_size: i * batch_size + batch_size]
+                    else:
+                        # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
+                        x_batch = indexes[i * batch_size:]
+
+                if stateful and (np.random.uniform() < zero_state_chance or i == 0):
+                    # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
+                    zero_state = np.zeros((len(x_batch), hidden_units))
+                    if state_is_tuple:
+                        state = []
+                        state.append(zero_state)
+                        state.append(zero_state)
+                        zero_state = state
+                    state = []
+                    for j in range(number_of_layers):
+                        state.append(zero_state)
+
                 # Now we have batch of integers to look in text from
                 x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
 
-                l, p, b, a = sess.run([self.loss, self.perplexity, self.bpc, self.accuracy],
-                                      feed_dict={self.x: x_batch,
-                                                 self.y: y_batch})
+                if stateful:
+                    feed_dict = {
+                        self.x: x_batch,
+                        self.y: y_batch,
+                        self.training: False,
+                        self.initial_state: state
+                    }
+                else:
+                    feed_dict = {
+                        self.x: x_batch,
+                        self.y: y_batch,
+                        self.training: False
+                    }
+
+                last_state, l, p, b, a = sess.run([self.state, self.loss, self.perplexity, self.bpc, self.accuracy],
+                                      feed_dict=feed_dict)
+
+                state = last_state
+
                 total_loss += l
                 if i == 0:
                     total_accuracy = a
@@ -644,11 +750,11 @@ if __name__ == '__main__':  # Main function
     TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
     # To see how it trains in small amounts (If it's usually in a 90%/5%/5% split, now it's in a 1%/1%/1% split)
-    '''
-    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 90]
-    VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]
-    TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
-    '''
+    # '''
+    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 540]
+    VALID_DATA = VALID_DATA[:len(VALID_DATA) // 30]
+    TEST_DATA = TEST_DATA[:len(TEST_DATA) // 30]
+    # '''
 
     hidden_units = find_optimal_hidden_units()
 
