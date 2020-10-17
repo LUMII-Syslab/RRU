@@ -11,7 +11,7 @@ import time
 import math
 from datetime import datetime  # We'll use this to dynamically generate training event names
 
-from sklearn.utils import shuffle  # We use this to shuffle training data
+from sklearn.utils import shuffle  # We'll use this to shuffle training data
 
 # Importing some functions that will help us deal with the input data
 from lm_efficient_utils import load_data
@@ -23,10 +23,10 @@ from lm_efficient_utils import get_input_data_from_indexes
 from adam_decay import AdamOptimizer_decay
 
 # Choose your cell
-cell_name = "RRU1"  # Here you type in the name of the cell you want to use
+cell_name = "RRU5"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
-output_size = None  # Most cells don't have an output size, so we defaultly put it as None
+output_size = None  # Most cells don't have an output size, so we by default set it as None
 state_is_tuple = False  # So we can make the RNN cell stateful even for LSTM based cells such as LSTM and MogrifierLSTM
 has_training_bool = False
 if cell_name == "RRU1":  # ReZero version
@@ -98,7 +98,7 @@ break_epochs_no_gain = 3  # If validation BPC doesn't get lower, after how many 
 hidden_units = 1024  # This will only be used if the number_of_parameters is None or < 1
 number_of_parameters = 24000000  # 24 million learnable parameters
 embedding_size = 128
-learning_rate = 0.0005  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
+learning_rate = 0.001  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
 number_of_layers = 2
 stateful = True  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
 zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
@@ -107,10 +107,10 @@ ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
 
 # After how many steps should we send the data to TensorBoard (0 – don't log after any amount of steps)
-log_after_this_many_steps = 10
+log_after_this_many_steps = 0
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
 # After how many steps should we print the results of training/validating/testing (0 – don't print until the last step)
-print_after_this_many_steps = 1
+print_after_this_many_steps = 100
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -750,11 +750,11 @@ if __name__ == '__main__':  # Main function
     TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
     # To see how it trains in small amounts (If it's usually in a 90%/5%/5% split, now it's in a 1%/1%/1% split)
-    # '''
-    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 540]
-    VALID_DATA = VALID_DATA[:len(VALID_DATA) // 30]
-    TEST_DATA = TEST_DATA[:len(TEST_DATA) // 30]
-    # '''
+    '''
+    TRAIN_DATA = TRAIN_DATA[:len(TRAIN_DATA) // 90]
+    VALID_DATA = VALID_DATA[:len(VALID_DATA) // 5]
+    TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
+    '''
 
     hidden_units = find_optimal_hidden_units()
 
