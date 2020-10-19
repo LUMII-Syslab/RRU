@@ -1,10 +1,11 @@
+# This is an early version of lm_main and lm_utils, that had very large memory usage
 import tensorflow as tf
 import numpy as np
 
 from sklearn.utils import shuffle
 
-from lm_utils import load_data
-from lm_utils import get_sequence_lengths
+from _unused.lm_heavy_utils import load_data
+from _unused.lm_heavy_utils import get_sequence_lengths
 
 from RRUCell import RRUCell
 
