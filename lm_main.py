@@ -14,9 +14,9 @@ from datetime import datetime  # We'll use this to dynamically generate training
 from sklearn.utils import shuffle  # We'll use this to shuffle training data
 
 # Importing some functions that will help us deal with the input data
-from lm_efficient_utils import load_data
-from lm_efficient_utils import get_window_indexes
-from lm_efficient_utils import get_input_data_from_indexes
+from lm_utils import load_data
+from lm_utils import get_window_indexes
+from lm_utils import get_input_data_from_indexes
 
 # Importing fancier optimizer(s)
 # from RAdam import RAdamOptimizer

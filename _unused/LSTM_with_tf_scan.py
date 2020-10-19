@@ -4,7 +4,7 @@ import tensorflow as tf
 import random
 import argparse
 
-from data_processor import load_all_data
+from LSTM_with_tf_scan_utils import load_all_data
 
 vocabulary_size = 5000  # 88583 for this dataset is the max! (?)
 sequence_length = 500  # There are from 6 to 2493 words in our dataset! (?)  // max_words

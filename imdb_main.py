@@ -6,10 +6,10 @@ import argparse
 from sklearn.utils import shuffle
 
 # Importing functions to load the data in the correct format, one function for tf dataset, one function for tfds dataset
-from data_processor import load_data_tdfs
-from data_processor import load_data_tf
+from imdb_utils import load_data_tdfs
+from imdb_utils import load_data_tf
 
-from data_processor import get_sequence_lengths
+from imdb_utils import get_sequence_lengths
 
 # Importing the different cells we are using, RRU being the self-made one
 from cells.BasicLSTMCell import BasicLSTMCell
