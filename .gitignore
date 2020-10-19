@@ -1,6 +1,9 @@
 .idea
 __pycache__
-ckpt
-logdir
+ckpt_imdb
+ckpt_lm
+ckpt_music
+logdir_imdb
 logdir_lm
+logdir_music
 data
