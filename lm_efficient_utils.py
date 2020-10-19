@@ -4,6 +4,10 @@ import zipfile
 
 from tensorflow.keras.preprocessing.text import Tokenizer
 
+supported_data_sets = ["enwik8", "text8", "pennchar", "penn"]
+unchanged_data_path = "data/lm/unchanged/"
+prepared_data_path = "data/lm/ready/"
+
 PADDING = "C_PAD"
 UNKNOWN = "C_UNK"
 
@@ -21,9 +25,9 @@ def prepare_text8(vocabulary_size):
 def prepare_enwik8_or_text8(name, vocabulary_size):
     # Read data set to a variable
     if name == "enwik8":
-        data = zipfile.ZipFile("data/enwik8.zip").read(name)
+        data = zipfile.ZipFile(f"{unchanged_data_path}enwik8.zip").read(name)
     elif name == "text8":
-        data = zipfile.ZipFile("data/text8.zip").read(name)
+        data = zipfile.ZipFile(f"{unchanged_data_path}text8.zip").read(name)
     else:
         raise Exception("    This function doesn't allow data sets, that aren't enwik8 or text8")
 
@@ -45,18 +49,18 @@ def prepare_enwik8_or_text8(name, vocabulary_size):
     valid_data = numerate(valid_data, vocab)
     test_data = numerate(test_data, vocab)
 
-    with open(f'data/{name}.pickle', 'wb') as f:
+    with open(f'{prepared_data_path}{name}.pickle', 'wb') as f:
         pickle.dump([train_data, valid_data, test_data, vocabulary_size], f)
 
 
 def prepare_pennchar(vocabulary_size):
     print("  Preparing Penn Treebank (PTB)...")
 
-    with open('data/pennchar/train.txt', 'r') as f:
+    with open(f'{unchanged_data_path}pennchar/train.txt', 'r') as f:
         train_data = f.read().split()
-    with open('data/pennchar/valid.txt', 'r') as f:
+    with open(f'{unchanged_data_path}pennchar/valid.txt', 'r') as f:
         valid_data = f.read().split()
-    with open('data/pennchar/test.txt', 'r') as f:
+    with open(f'{unchanged_data_path}pennchar/test.txt', 'r') as f:
         test_data = f.read().split()
 
     total_length = len(train_data) + len(valid_data) + len(test_data)
@@ -70,7 +74,7 @@ def prepare_pennchar(vocabulary_size):
     valid_data = numerate(valid_data, vocab)
     test_data = numerate(test_data, vocab)
 
-    with open(f'data/pennchar.pickle', 'wb') as f:
+    with open(f'{prepared_data_path}pennchar.pickle', 'wb') as f:
         pickle.dump([train_data, valid_data, test_data, vocabulary_size], f)
 
 
@@ -106,11 +110,11 @@ def numerate(data, vocab):
 def prepare_penn(vocabulary_size):
     print("  Preparing Penn Treebank (PTB)...")
 
-    with open('data/penn/train.txt', 'r') as f:
+    with open(f'{unchanged_data_path}penn/train.txt', 'r') as f:
         train_data = f.read().split()
-    with open('data/penn/valid.txt', 'r') as f:
+    with open(f'{unchanged_data_path}penn/valid.txt', 'r') as f:
         valid_data = f.read().split()
-    with open('data/penn/test.txt', 'r') as f:
+    with open(f'{unchanged_data_path}penn/test.txt', 'r') as f:
         test_data = f.read().split()
 
     # Transform the data integer format and get the necessary tools to deal with that later
@@ -122,7 +126,7 @@ def prepare_penn(vocabulary_size):
     valid_data = [item for sublist in valid_data for item in sublist]
     test_data = [item for sublist in test_data for item in sublist]
 
-    with open(f'data/penn.pickle', 'wb') as f:
+    with open(f'{prepared_data_path}penn.pickle', 'wb') as f:
         pickle.dump([train_data, valid_data, test_data, vocabulary_size], f)
 
 
@@ -147,12 +151,10 @@ def process(raw_text, vocabulary_size):
 def load_data(name):
     print("Started loading data...")
     # Check if data set is supported
-    list_of_data_sets = ['enwik8', 'text8', 'pennchar', 'penn']
-
-    if name not in list_of_data_sets:
+    if name not in supported_data_sets:
         raise Exception("This code doesn't support the following data set!")
 
-    with open(f'data/{name}.pickle', 'rb') as f:
+    with open(f'{prepared_data_path}{name}.pickle', 'rb') as f:
         train_data, valid_data, test_data, vocabulary_size = pickle.load(f)
 
     return train_data, valid_data, test_data, vocabulary_size

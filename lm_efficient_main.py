@@ -73,7 +73,7 @@ elif cell_name == "LSTM":
     state_is_tuple = True
     model_name = 'lstm_model'
 
-elif cell_name == "MogrifierLSTM":  # Comment this out and you don't have to have dm-sonnet, etc. installed
+elif cell_name == "MogrifierLSTM":  # For this you have to have dm-sonnet, etc. installed
     from tiled_lstm import TiledLSTMCell
     cell_fn = TiledLSTMCell
     state_is_tuple = True
