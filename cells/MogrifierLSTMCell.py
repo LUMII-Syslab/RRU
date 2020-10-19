@@ -19,13 +19,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from MogrifierLSTM import tiled_linear
-from MogrifierLSTM import utils
+from cells.MogrifierLSTM import tiled_linear
+from cells.MogrifierLSTM import utils
 import six
 import tensorflow.compat.v1 as tf
 
 
-class TiledLSTMCell(tf.nn.rnn_cell.RNNCell):
+class MogrifierLSTMCell(tf.nn.rnn_cell.RNNCell):
   """An LSTM cell with tiled connections.
   Supports various connectivity patterns such as the vanilla, dense
   TiledLinear, and also SparseTiledLinear, LayerNormedTiledLinear.

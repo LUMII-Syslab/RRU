@@ -7,7 +7,7 @@ from sklearn.utils import shuffle
 from _unused.lm_heavy_utils import load_data
 from _unused.lm_heavy_utils import get_sequence_lengths
 
-from RRUCell import RRUCell
+from cells.RRUCell import RRUCell
 
 # Hyperparameters
 data_set_name = "enwik8"  # "enwik8", "text8", "pennchar", "penn"

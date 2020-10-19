@@ -12,9 +12,9 @@ from data_processor import load_data_tf
 from data_processor import get_sequence_lengths
 
 # Importing the different cells we are using, RRU being the self-made one
-from BasicLSTMCell import BasicLSTMCell
-from GRUCell import GRUCell
-from RRUCell import RRUCell
+from cells.BasicLSTMCell import BasicLSTMCell
+from cells.GRUCell import GRUCell
+from cells.RRUCell import RRUCell
 
 # Hyperparameters
 vocabulary_size = 10000  # 88583 for tfds is the max. 24902 for tf.keras is the max

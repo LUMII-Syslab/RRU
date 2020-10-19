@@ -30,52 +30,52 @@ output_size = None  # Most cells don't have an output size, so we by default set
 state_is_tuple = False  # So we can make the RNN cell stateful even for LSTM based cells such as LSTM and MogrifierLSTM
 has_training_bool = False
 if cell_name == "RRU1":  # ReZero version
-    from RRUCell import RRUCell
+    from cells.RRUCell import RRUCell
     cell_fn = RRUCell
     output_size = 256
     has_training_bool = True
     model_name = 'rru_model'
 
 elif cell_name == "RRU2":  # Gated version with 1 transformation
-    from GatedRRUCell import RRUCell  # (I already have some results with this one)
+    from cells.GatedRRUCell import RRUCell  # (I already have some results with this one)
     cell_fn = RRUCell
     has_training_bool = True
     model_name = 'grru1_model'
 
 elif cell_name == "RRU3":  # Gated version with 2 transformations
-    from GatedRRUCell2 import RRUCell
+    from cells.GatedRRUCell2 import RRUCell
     cell_fn = RRUCell
     has_training_bool = True
     model_name = 'grru2_model'
 
 elif cell_name == "RRU4":  # Gated version with 2 transformations and a separate output size
-    from GatedRRUCell2_a import RRUCell
+    from cells.GatedRRUCell2_a import RRUCell
     cell_fn = RRUCell
     has_training_bool = True
     output_size = 256
     model_name = 'grru2a_model'
 
 elif cell_name == "RRU5":  # Gated version with separate output size
-    from GatedRRUCell_a import RRUCell
+    from cells.GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
     has_training_bool = True
     output_size = 256
     model_name = "grrua_model"  # We have hopes for this one
 
 elif cell_name == "GRU":
-    from GRUCell import GRUCell
+    from cells.GRUCell import GRUCell
     cell_fn = GRUCell
     model_name = 'gru_model'
 
 elif cell_name == "LSTM":
-    from BasicLSTMCell import BasicLSTMCell
+    from cells.BasicLSTMCell import BasicLSTMCell
     cell_fn = BasicLSTMCell
     state_is_tuple = True
     model_name = 'lstm_model'
 
 elif cell_name == "MogrifierLSTM":  # For this you have to have dm-sonnet, etc. installed
-    from tiled_lstm import TiledLSTMCell
-    cell_fn = TiledLSTMCell
+    from cells.MogrifierLSTMCell import MogrifierLSTMCell
+    cell_fn = MogrifierLSTMCell
     state_is_tuple = True
     model_name = 'mogrifier_lstm_model'
 
@@ -107,10 +107,10 @@ ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
 
 # After how many steps should we send the data to TensorBoard (0 – don't log after any amount of steps)
-log_after_this_many_steps = 0
+log_after_this_many_steps = 10
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
 # After how many steps should we print the results of training/validating/testing (0 – don't print until the last step)
-print_after_this_many_steps = 100
+print_after_this_many_steps = 1
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
