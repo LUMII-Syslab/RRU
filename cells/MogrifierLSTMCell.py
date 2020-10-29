@@ -35,8 +35,8 @@ class MogrifierLSTMCell(tf.nn.rnn_cell.RNNCell):
       self, num_units,
       use_peepholes=False, cell_clip=None,
       initializer=None, num_proj=None,
-      feature_mask_rounds=6,  # 0 – it was 0 officially, we changed it to much our system
-      feature_mask_rank=79,  # 0 – it was 0 officially, we changed it to much our system
+      feature_mask_rounds=4,  # 0 in original, 6 enwik8, 4 ptbchar
+      feature_mask_rank=24,  # 0 in original, 79 enwik8, 24 ptbhchar
       tie_gates=False,
       cap_input_gate=True,
       layer_norm=False,

@@ -31,23 +31,26 @@ def prepare_enwik8_or_text8(name, vocabulary_size):
     else:
         raise Exception("    This function doesn't allow data sets, that aren't enwik8 or text8")
 
-    print("    Length of {} data set is {}".format(name, len(data)))
+    print(f"    Length of {name} data set is {len(data)}")
 
-    # Standard data set split is 90%/5%/5%, and 5% are 5 000 000
-    num_test_chars = 5000000
+    # Standard data set split for enwik8 and text8 is 90%/5%/5%
+    validation_split_percentage = 5
+    test_split_percentage = 5
+    num_validation_chars = len(data) * validation_split_percentage // 100
+    num_test_chars = len(data) * test_split_percentage // 100
+    num_validation_and_test_chars = num_validation_chars + num_test_chars
 
     print("    Splitting data in training/validation/testing...")
-    # Split it as 90/5/5
-    train_data = data[: -2 * num_test_chars]
-    valid_data = data[-2 * num_test_chars: -num_test_chars]
+    train_data = data[: -num_validation_and_test_chars]
+    valid_data = data[-num_validation_and_test_chars: -num_test_chars]
     test_data = data[-num_test_chars:]
 
     print("    Getting vocabulary...")
-    vocab = get_vocabulary(train_data, vocabulary_size)
+    vocabulary = get_vocabulary(train_data, vocabulary_size)
 
-    train_data = numerate(train_data, vocab)
-    valid_data = numerate(valid_data, vocab)
-    test_data = numerate(test_data, vocab)
+    train_data = numerate(train_data, vocabulary)
+    valid_data = numerate(valid_data, vocabulary)
+    test_data = numerate(test_data, vocabulary)
 
     with open(f'{prepared_data_path}{name}.pickle', 'wb') as f:
         pickle.dump([train_data, valid_data, test_data, vocabulary_size], f)
@@ -64,27 +67,26 @@ def prepare_pennchar(vocabulary_size):
         test_data = f.read().split()
 
     total_length = len(train_data) + len(valid_data) + len(test_data)
-    print("    Length of PTB character data set is {} with split: {} / {} / {}"
-          .format(total_length, len(train_data), len(valid_data), len(test_data)))
+    print(f"    Length of PTB character data set is {total_length} with split: {len(train_data)} / {len(valid_data)} / {len(test_data)}")
 
     print("    Getting vocabulary...")
-    vocab = get_vocabulary(train_data, vocabulary_size=vocabulary_size)
+    vocabulary = get_vocabulary(train_data, vocabulary_size=vocabulary_size)
 
-    train_data = numerate(train_data, vocab)
-    valid_data = numerate(valid_data, vocab)
-    test_data = numerate(test_data, vocab)
+    train_data = numerate(train_data, vocabulary)
+    valid_data = numerate(valid_data, vocabulary)
+    test_data = numerate(test_data, vocabulary)
 
     with open(f'{prepared_data_path}pennchar.pickle', 'wb') as f:
         pickle.dump([train_data, valid_data, test_data, vocabulary_size], f)
 
 
 def get_vocabulary(data, vocabulary_size):  # Get the character vocabulary from the given data
-    vocab = {}
+    vocabulary = {}
     print("    Getting the vocabulary (an integer for each character)...")
     for char in data:
-        vocab[str(char)] = vocab[str(char)] + 1 if char in vocab else 1
+        vocabulary[str(char)] = vocabulary[str(char)] + 1 if char in vocabulary else 1
 
-    sort = sorted(vocab, key=vocab.get, reverse=True)
+    sort = sorted(vocabulary, key=vocabulary.get, reverse=True)
     sort = [PADDING, UNKNOWN] + sort
 
     # for index, value in enumerate(sort):
@@ -160,7 +162,7 @@ def load_data(name):
     return train_data, valid_data, test_data, vocabulary_size
 
 
-def one_hot_encode(labels, vocab_size):
+def one_hot_encode(labels, vocab_size):  # Currently not used anymore (you can check this statement later)
     n_labels = len(labels)
     n_unique_labels = vocab_size  # len(np.unique(labels))
     one_hot_encoded = np.zeros((n_labels, n_unique_labels))  # Now it's [0 0] [0 0]
@@ -187,11 +189,11 @@ def get_input_data_from_indexes(data, indexes, window_size):
 
 
 if __name__ == '__main__':  # Main function
-    print("Preparing character level data sets...")
+    print("Preparing character-level data sets...")
     prepare_enwik8(vocabulary_size=207)
     prepare_text8(vocabulary_size=29)
     prepare_pennchar(vocabulary_size=51)
-    print("Preparing word level data sets...")
+    print("Preparing word-level data sets...")
     prepare_penn(vocabulary_size=9650)
 
     # To load a specific data set use:

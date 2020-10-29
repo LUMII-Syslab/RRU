@@ -2,12 +2,12 @@ import tensorflow as tf
 import numpy as np
 
 from tensorflow.keras.preprocessing.text import Tokenizer
-import tensorflow_datasets as tdfs
 from tensorflow.keras.preprocessing import sequence
 
 
 def process(raw_text, vocabulary_size):
-    # We might want to delete some words - maybe delete punctuation marks and words like "I, and". nltk library can help
+    # We might want to delete some words - maybe delete punctuation marks and words like "I", "and", etc.
+    # "nltk" library can help with that, if you wish
 
     # Initialize the Tokenizer
     t = Tokenizer(num_words=vocabulary_size, oov_token=True)
@@ -24,45 +24,14 @@ def process(raw_text, vocabulary_size):
     return data, word_to_index, index_to_word, t
 
 
-def load_data(train_or_test):
-    # We don't use the dataset for epochs, so this will just give us the imdb_reviews in some random shuffled order
-    ds = tdfs.load('imdb_reviews', split=train_or_test, shuffle_files=True)
-    # ds = ds.take(1000)  # To take only a few examples
-    x = []
-    y = []
-    for review in tdfs.as_numpy(ds):
-        text = review['text']
-        text = text.decode()  # bytes -> string
-        label = review['label']  # 0 for negative, 1 for positive
-        x.append(text)
-        y.append(label)
-    return x, y
-
-
-def load_data_tdfs(vocabulary_size):
-    x_train, y_train = load_data('train')
-    x_test, y_test = load_data('test')
-
-    x_train, word_to_index, index_to_word, t = process(x_train, vocabulary_size)
-    x_test = t.texts_to_sequences(x_test)
-
-    # Get the longest sequence length
-    max_words = len(max((x_train + x_test), key=len))
-
-    x_train = sequence.pad_sequences(x_train, maxlen=max_words, padding='post')
-    x_test = sequence.pad_sequences(x_test, maxlen=max_words, padding='post')
-
-    y_train = one_hot_encode(y_train)
-    y_test = one_hot_encode(y_test)
-    return x_train, y_train, x_test, y_test, word_to_index, index_to_word, t, max_words
-
-
-def load_data_tf(num_words, trim_length):
+def load_data(num_words, trim_length):
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.imdb.load_data(num_words=num_words)
 
     # Get the longest sequence length
     maxlen = len(max((x_train + x_test), key=len))
-    maxlen = min(maxlen, trim_length)
+    # Trim the sequences if such number was specified and it was less than maximum length
+    if trim_length is not None:
+        maxlen = min(maxlen, trim_length)
 
     x_train = sequence.pad_sequences(x_train, maxlen=maxlen, padding='post')
     x_test = sequence.pad_sequences(x_test, maxlen=maxlen, padding='post')
@@ -81,10 +50,48 @@ def one_hot_encode(labels):
     return one_hot_encoded
 
 
-def get_sequence_lengths(x):  # Full sequence length minus the padded zeros
+def get_sequence_lengths(sequences):  # Full sequence length minus the padded zeros
     sequence_lengths = []
-    for sequence in x:
-        sequence = np.array(sequence)  # Without this line it returns full length for casual lists [1,1,1,0,0]->5
-        sequence_length = len(sequence) - np.count_nonzero(sequence == 0)  # Count of non-padded symbols
+    for sequence_ in sequences:
+        sequence_ = np.array(sequence_)  # Without this line it returns full length for casual lists [1,1,1,0,0]->5
+        sequence_length = len(sequence_) - np.count_nonzero(sequence_ == 0)  # Count of non-padded symbols
         sequence_lengths.append(sequence_length)
     return sequence_lengths
+
+
+def load_data_tdfs(vocabulary_size):
+    import tensorflow_datasets as tdfs
+
+    # If you want to use it in your program, you need to use:
+    # from imdb_utils import load_data_tdfs
+    # X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, WORD_TO_ID, ID_TO_WORD, T, max_sequence_length = load_data_tdfs(vocabulary_size)
+
+    def load_data_slice(train_or_test):
+        # We don't use the dataset for epochs, so this will just give us the imdb_reviews in some random shuffled order
+        ds = tdfs.load('imdb_reviews', split=train_or_test, shuffle_files=True)
+        # ds = ds.take(1000)  # To take only a few examples
+        x = []
+        y = []
+        for review in tdfs.as_numpy(ds):
+            text = review['text']
+            text = text.decode()  # bytes -> string
+            label = review['label']  # 0 for negative, 1 for positive
+            x.append(text)
+            y.append(label)
+        return x, y
+
+    x_train, y_train = load_data_slice('train')
+    x_test, y_test = load_data_slice('test')
+
+    x_train, word_to_index, index_to_word, t = process(x_train, vocabulary_size)
+    x_test = t.texts_to_sequences(x_test)
+
+    # Get the longest sequence length
+    max_words = len(max((x_train + x_test), key=len))
+
+    x_train = sequence.pad_sequences(x_train, maxlen=max_words, padding='post')
+    x_test = sequence.pad_sequences(x_test, maxlen=max_words, padding='post')
+
+    y_train = one_hot_encode(y_train)
+    y_test = one_hot_encode(y_test)
+    return x_train, y_train, x_test, y_test, word_to_index, index_to_word, t, max_words

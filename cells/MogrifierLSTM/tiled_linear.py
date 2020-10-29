@@ -21,7 +21,7 @@ from __future__ import print_function
 
 import re
 from absl import logging
-from MogrifierLSTM import utils
+from cells.MogrifierLSTM import utils
 import six
 from sonnet.python.modules import base as snt_base
 import tensorflow.compat.v1 as tf

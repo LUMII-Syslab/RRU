@@ -2,8 +2,8 @@ import pickle
 import numpy as np
 
 supported_data_sets = ["JSB Chorales", "MuseData", "Nottingham", "Piano-midi.de"]
-unchanged_data_path = "data/unchanged/"
-prepared_data_path = "data/ready/"
+unchanged_data_path = "data/music/unchanged/"
+prepared_data_path = "data/music/ready/"
 
 
 def smallest(a, b):
@@ -35,7 +35,7 @@ def analyse_data(data_path=unchanged_data_path, mode="full"):
                 train, valid, test, vocab = pickle.load(f)
             else:
                 data = pickle.load(f)
-                # All 4 music data sets have 3 keys – 'test', 'train', 'valid'
+                # All 4 music data sets have 3 keys - 'test', 'train', 'valid'
                 train = data['train']
                 valid = data['valid']
                 test = data['test']
@@ -66,10 +66,10 @@ def analyse_data(data_path=unchanged_data_path, mode="full"):
 
                 if mode == "full":
                     print(12 * ' ', description)  # Train, Valid, Test
-                    print(18 * ' ', f"Big sequences – {big_sequences}")
-                    print(18 * ' ', f"Middle sequences – from {middle_sequences[0]} to {middle_sequences[1]}")
-                    print(18 * ' ', f"Small sequences – from {small_sequences[0]} to {small_sequences[1]}")
-                    print(18 * ' ', f"Range – from {value_range[0]} to {value_range[1]}")
+                    print(18 * ' ', f"Big sequences - {big_sequences}")
+                    print(18 * ' ', f"Middle sequences - from {middle_sequences[0]} to {middle_sequences[1]}")
+                    print(18 * ' ', f"Small sequences - from {small_sequences[0]} to {small_sequences[1]}")
+                    print(18 * ' ', f"Range - from {value_range[0]} to {value_range[1]}")
 
                 global_big_sequences[0] = smallest(global_big_sequences[0], big_sequences)
                 global_big_sequences[1] = biggest(global_big_sequences[1], big_sequences)
@@ -80,11 +80,11 @@ def analyse_data(data_path=unchanged_data_path, mode="full"):
                 global_value_range[0] = smallest(global_value_range[0], value_range[0])
                 global_value_range[1] = biggest(global_value_range[1], value_range[1])
 
-            print(12 * ' ', "Total")
-            print(18 * ' ', f"Big sequences – from {global_big_sequences[0]} to {global_big_sequences[1]}")
-            print(18 * ' ', f"Middle sequences – from {global_middle_sequences[0]} to {global_middle_sequences[1]}")
-            print(18 * ' ', f"Small sequences – from {global_small_sequences[0]} to {global_small_sequences[1]}")
-            print(18 * ' ', f"Range – from {global_value_range[0]} to {global_value_range[1]}")
+            print(12 * ' ', f"Total")
+            print(18 * ' ', f"Big sequences - from {global_big_sequences[0]} to {global_big_sequences[1]}")
+            print(18 * ' ', f"Middle sequences - from {global_middle_sequences[0]} to {global_middle_sequences[1]}")
+            print(18 * ' ', f"Small sequences - from {global_small_sequences[0]} to {global_small_sequences[1]}")
+            print(18 * ' ', f"Range - from {global_value_range[0]} to {global_value_range[1]}")
 
 
 def prepare_data(name):
@@ -96,7 +96,7 @@ def prepare_data(name):
 
     with open(f'{unchanged_data_path}{name}.pickle', 'rb') as f:
         data = pickle.load(f)
-        # All 4 music data sets have 3 keys – 'test', 'train', 'valid'
+        # All 4 music data sets have 3 keys - 'test', 'train', 'valid'
         train = data['train']
         valid = data['valid']
         test = data['test']
@@ -116,7 +116,7 @@ def mask_the_data(data):
         for seq2 in seq:
             # Here each seq2 is [1, 2, 3]
 
-            if not seq2:  # If this sequence is empty – [] or ()
+            if not seq2:  # If this sequence is empty - [] or ()
                 continue
 
             # Some sequences are tuple, so we change them to a list, you can add an if statement if it
@@ -132,9 +132,9 @@ def mask_the_data(data):
 # Idea for this function is that, if we have total possibilities [1; 8], and at some time step we have
 # We have numbers [1, 2, 3], then we want to get a binary mask [1,1,1,0,0,0,0,0]
 # Parameters:
-#   numbers – numbers at the current time step, for example, [1, 2, 3]
-#   mask_size - total numbers possible, for example, for MIDI numbers – 88
-#   delay – from which number the numbers start, for example, for MIDI numbers - 21
+#   numbers - numbers at the current time step, for example, [1, 2, 3]
+#   mask_size - total numbers possible, for example, for MIDI numbers - 88
+#   delay - from which number the numbers start, for example, for MIDI numbers - 21
 def binary_mask(numbers, mask_size, delay=0):
     numbers = [x - delay for x in numbers]
     mask = np.zeros(mask_size)

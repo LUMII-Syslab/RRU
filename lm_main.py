@@ -8,7 +8,6 @@
 import tensorflow as tf
 import numpy as np
 import time
-import math
 from datetime import datetime  # We'll use this to dynamically generate training event names
 
 from sklearn.utils import shuffle  # We'll use this to shuffle training data
@@ -18,12 +17,17 @@ from lm_utils import load_data
 from lm_utils import get_window_indexes
 from lm_utils import get_input_data_from_indexes
 
+# Importing some utility functions that will help us with certain tasks
+from utils import find_optimal_hidden_units
+from utils import gelu
+from utils import print_trainable_variables
+
 # Importing fancier optimizer(s)
 # from RAdam import RAdamOptimizer
 from adam_decay import AdamOptimizer_decay
 
 # Choose your cell
-cell_name = "RRU5"  # Here you can type in the name of the cell you want to use
+cell_name = "MogrifierLSTM"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -84,7 +88,7 @@ else:
 
 # Hyperparameters
 # Data parameters
-data_set_name = "enwik8"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
+data_set_name = "pennchar"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
 window_size = 512  # Enwik8 – 512. Text8 512?, PTB word-level 70?, PTB character-level 150?
 step_size = window_size // 2
@@ -95,8 +99,8 @@ shuffle_data = False  # Should we shuffle the samples?
 # Training
 num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 break_epochs_no_gain = 3  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
-hidden_units = 1024  # This will only be used if the number_of_parameters is None or < 1
 number_of_parameters = 24000000  # 24 million learnable parameters
+HIDDEN_UNITS = 1024  # This will only be used if the number_of_parameters is None or < 1
 embedding_size = 128
 learning_rate = 0.001  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
 number_of_layers = 2
@@ -107,19 +111,19 @@ ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
 
 # After how many steps should we send the data to TensorBoard (0 – don't log after any amount of steps)
-log_after_this_many_steps = 10
+log_after_this_many_steps = 0
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
 # After how many steps should we print the results of training/validating/testing (0 – don't print until the last step)
-print_after_this_many_steps = 1
+print_after_this_many_steps = 100
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-output_path = log_path + model_name + '/enwik8/' + current_time
+output_path = log_path + model_name + f'/{data_set_name}/' + current_time
 
 
-class RNNLMModel:
+class LMModel:
 
-    def __init__(self):
+    def __init__(self, hidden_units):
 
         print("\nBuilding Graph...\n")
 
@@ -141,10 +145,6 @@ class RNNLMModel:
         embed_lookup = tf.nn.embedding_lookup(embedding, x)
 
         # Create the RNN cell, corresponding to the one you chose, for example, RRU, GRU, LSTM, MogrifierLSTM
-        # cell = cell_fn(hidden_units, training=training)  # Testing
-        # Old 1 layer way
-        # cell = cell_fn(hidden_units)
-        # New 1+ layer way
         cells = []
         for _ in range(number_of_layers):
             if has_training_bool:
@@ -192,6 +192,8 @@ class RNNLMModel:
                                          embed_lookup,
                                          initial_state=initial_state,
                                          dtype=tf.float32)
+
+        # ### Maybe we can do this later if we use tf2.0 final_size = tf.shape(value)[-1]
 
         ''' Uncomment these if you want a lot of extra data (it takes a lot of memory space, though) '''
         # value = value_all[:, :, :final_size]
@@ -268,6 +270,8 @@ class RNNLMModel:
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
         # Expose symbols to class
+        # Parameters, that we need public
+        self.hidden_units = hidden_units
         # Placeholders
         self.x = x
         self.y = y
@@ -284,11 +288,7 @@ class RNNLMModel:
         self.prediction = prediction
         self.correct_prediction = correct_prediction
 
-        trainable_variables = tf.trainable_variables()
-        variables_total = 0
-        for v in trainable_variables:
-            variables_total += np.product(v.get_shape().as_list())
-        print("Learnable parameters:", variables_total / 1000 / 1000, 'M', flush=True)  # Some divide it by 1024 twice
+        print_trainable_variables()
 
         print("\nGraph Built...\n")
 
@@ -298,6 +298,7 @@ class RNNLMModel:
 
         with tf.Session(config=tf_config) as sess:
             print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
+
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
             # Adding a writer so we can visualize accuracy and loss on TensorBoard
@@ -371,12 +372,9 @@ class RNNLMModel:
 
                     if stateful and (np.random.uniform() < zero_state_chance or i == 0):
                         # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
-                        zero_state = np.zeros((len(x_batch), hidden_units))
+                        zero_state = np.zeros((len(x_batch), self.hidden_units))
                         if state_is_tuple:
-                            state = []
-                            state.append(zero_state)
-                            state.append(zero_state)
-                            zero_state = state
+                            zero_state = [zero_state, zero_state]
                         state = []
                         for j in range(number_of_layers):
                             state.append(zero_state)
@@ -474,20 +472,18 @@ class RNNLMModel:
                                 for j in range(i, len(validation_indexes), num_validation_batches):
                                     x_batch.append(validation_indexes[j])
                         else:
-                            if fixed_batch_size or i != num_validation_batches - 1:  # The batch_size is fixed or it's not the last
+                            # If the batch size is fixed or it's not the last batch, we use batch size
+                            if fixed_batch_size or i != num_validation_batches - 1:
                                 x_batch = validation_indexes[i * batch_size: i * batch_size + batch_size]
                             else:
-                                # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
+                                # Run the remaining sequences (that might be larger than batch size)
                                 x_batch = validation_indexes[i * batch_size:]
 
                         if stateful and (np.random.uniform() < zero_state_chance or i == 0):
                             # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
-                            zero_state = np.zeros((len(x_batch), hidden_units))
+                            zero_state = np.zeros((len(x_batch), self.hidden_units))
                             if state_is_tuple:
-                                state = []
-                                state.append(zero_state)
-                                state.append(zero_state)
-                                zero_state = state
+                                zero_state = [zero_state, zero_state]
                             state = []
                             for j in range(number_of_layers):
                                 state.append(zero_state)
@@ -509,8 +505,12 @@ class RNNLMModel:
                                 self.training: False
                             }
 
-                        last_state, l, p, b, a = sess.run([self.state, self.loss, self.perplexity, self.bpc, self.accuracy],
-                                              feed_dict=feed_dict)
+                        last_state, l, p, b, a = sess.run([self.state,
+                                                           self.loss,
+                                                           self.perplexity,
+                                                           self.bpc,
+                                                           self.accuracy],
+                                                          feed_dict=feed_dict)
 
                         state = last_state
 
@@ -619,12 +619,9 @@ class RNNLMModel:
 
                 if stateful and (np.random.uniform() < zero_state_chance or i == 0):
                     # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
-                    zero_state = np.zeros((len(x_batch), hidden_units))
+                    zero_state = np.zeros((len(x_batch), self.hidden_units))
                     if state_is_tuple:
-                        state = []
-                        state.append(zero_state)
-                        state.append(zero_state)
-                        zero_state = state
+                        zero_state = [zero_state, zero_state]
                     state = []
                     for j in range(number_of_layers):
                         state.append(zero_state)
@@ -647,7 +644,7 @@ class RNNLMModel:
                     }
 
                 last_state, l, p, b, a = sess.run([self.state, self.loss, self.perplexity, self.bpc, self.accuracy],
-                                      feed_dict=feed_dict)
+                                                  feed_dict=feed_dict)
 
                 state = last_state
 
@@ -669,83 +666,6 @@ class RNNLMModel:
                   f" Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
 
 
-def find_optimal_hidden_units():
-    # Inspired from https://github.com/deepmind/lamb/blob/master/lamb/lamb_flags.py
-    # They made a version that takes in a config file, which might be more useful to some people
-    print(f"Searching for the largest possible hidden unit count"
-          f",  which has <= {number_of_parameters} trainable parameters!")
-
-    global hidden_units
-
-    # If there wasn't given correct number of total parameters, then just use the given hidden units
-    if number_of_parameters is None or number_of_parameters < 1:
-        return hidden_units
-
-    # If code goes this far, we don't care about the value in hidden_units variable anymore
-    # , we will change it after it returns something
-
-    def calculate_num_params_given_hidden_units(units):
-        global hidden_units
-        hidden_units = units
-
-        # Before we used "test_model = RNNLMModel()" and in the end "del test_model", but it doesn't seem to help, but
-        # If some time later you get some memory error, you can probably try this
-
-        RNNLMModel()
-
-        # Get the number of parameters in the current model
-        trainable_variables = tf.trainable_variables()
-        variable_count = 0
-        for variable in trainable_variables:
-            variable_count += np.product(variable.get_shape().as_list())
-
-        tf.keras.backend.clear_session()  # This is necessary, so there isn't any excess stuff left
-
-        return variable_count
-
-    def is_good(hidden_count):
-        m = calculate_num_params_given_hidden_units(hidden_count)
-        correct = (m <= number_of_parameters)
-        if m is None:
-            print(f"Hidden units = {hidden_count}, number of trainable parameters = None BAD")
-        elif correct:
-            print(f"Hidden units = {hidden_count}, number of trainable parameters = {m} GOOD")
-        else:
-            print(f"Hidden units = {hidden_count}, number of trainable parameters = {m} BAD")
-        return correct, m
-
-    # Double the size until it's too large.
-    previous_hidden_size = 1
-    hidden_size = 1
-    good, n = is_good(hidden_size)
-    while good:
-        previous_hidden_size = hidden_size
-        hidden_size = max(hidden_size + 1, int(hidden_size * math.sqrt(1.2 * number_of_parameters / n)))
-        good, n = is_good(hidden_size)
-
-    # Find the real answer in the range – [previous_hidden_size, hidden_size] range
-    def find_answer(lower, upper):
-        while lower < upper - 1:  # While the difference is bigger than 1
-            # The number of parameters is likely to be at least quadratic in
-            # hidden_size. Find the middle point in log space.
-            # math.exp does e^x, where x is given.
-            # math.log does ln(x) aka e^y=x
-            middle = int(math.exp((math.log(upper) + math.log(lower)) / 2))
-            # The middle has to be 1 larger than the bottom limit or 1 smaller then the upper limit
-            middle = min(max(middle, lower + 1), upper - 1)
-            if is_good(middle)[0]:
-                lower = middle
-            else:
-                upper = middle
-        return lower
-
-    return find_answer(previous_hidden_size, hidden_size)
-
-
-def gelu(x):
-    return x * tf.sigmoid(1.702 * x)
-
-
 if __name__ == '__main__':  # Main function
     TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
@@ -756,9 +676,14 @@ if __name__ == '__main__':  # Main function
     TEST_DATA = TEST_DATA[:len(TEST_DATA) // 5]
     '''
 
-    hidden_units = find_optimal_hidden_units()
+    # From which function/class we can get the model
+    model_function = LMModel
 
-    model = RNNLMModel()  # Create the model
+    HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
+                                             number_of_parameters=number_of_parameters,
+                                             model_function=model_function)
+
+    model = model_function(HIDDEN_UNITS)  # Create the model
 
     model.fit(TRAIN_DATA, VALID_DATA)  # Train the model (validating after each epoch)
 

@@ -16,13 +16,13 @@ from adam_decay import AdamOptimizer_decay
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 #
 # You can check if this line makes it train faster, while still training correctly
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "RRU5"  # Here you can type in the name of the cell you want to use
+cell_name = "GRU"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -110,7 +110,7 @@ current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
 output_path = log_path + model_name + f'/{data_set_name}/' + current_time
 
 
-class Music:
+class MusicModel:
 
     def __init__(self):
 
@@ -171,17 +171,29 @@ class Music:
         # [batch_size, window_size, vocabulary_size] -> [batch_size x window_size, vocabulary_size]
         labels = tf.reshape(y, shape=(-1, vocabulary_size))
 
-        # Calculate the loss given prediction and labels
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=prediction, labels=labels))
-        tf.summary.scalar("loss", loss)
-
-
-
-        bpc = tf.reduce_mean(loss)/np.log(2)
-        tf.summary.scalar("bpc", bpc)
-
-        perplexity = tf.exp(loss)
-        tf.summary.scalar("perplexity", perplexity)
+        ''' Here I will try to create NLL loss '''
+        # y holds the correct pitches at each time, we need to get reverse, that is [1,0,1]->[0,1,0]
+        casted_y = tf.dtypes.cast(y, tf.int8)
+        reversed_casted_y = tf.bitwise.invert(casted_y)
+        reversed_y = tf.dtypes.cast(reversed_casted_y, tf.float32)
+        # Now we have everything to calculate the loss
+        # We want to take negative natural logarithm from our predictions, where the correct answers were
+        # So we need 2 things:
+        # 1. Where y had 1, we must take natural logarithm from prediction
+        # 2. Where y had 0, we must we need to put 1, because y = log e (x) = log e (1) = 0
+        # Reshape our prediction, so it matches y shape - [batch_size, window_size, vocabulary_size]
+        reshaped_prediction = tf.reshape(prediction, shape=(-1, window_size, vocabulary_size))
+        # We only keep the prediction values where y was true, example:
+        # prediction = [0.32,0.65.0.88] and y = [0,1,0] -> nll_first = [0,0.65,0]
+        nll_prediction = reshaped_prediction * y
+        # Now where y was 0 we need to add 1, we do this by getting the reversed y, as I did above
+        nll_prediction = nll_prediction + reversed_y
+        nll_matrix = -tf.math.log(nll_prediction)  # y = log e (x)
+        loss = tf.reduce_sum(nll_matrix) / tf.dtypes.cast(current_batch_size, tf.float32)
+        tf.summary.scalar("nll", loss)
+        ''' Regular way Calculate the loss given prediction and labels '''
+        # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=prediction, labels=labels))
+        # tf.summary.scalar("loss", loss)
 
         # Printing trainable variables which have "kernel" in their name
         decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
@@ -203,8 +215,6 @@ class Music:
         self.training = training
         # Information you can get from this graph
         self.loss = loss
-        self.perplexity = perplexity
-        self.bpc = bpc
         self.optimizer = optimizer
         self.prediction = prediction
 
@@ -236,9 +246,9 @@ class Music:
 
             num_batches = len(x_train) // batch_size
 
-            # Variables that help implement the early stopping if no validation perplexity (in BPC) decrease is observed
+            # Variables that help implement the early stopping if no validation loss decrease is observed
             epochs_no_gain = 0
-            best_validation_bpc = None
+            best_validation_loss = None
 
             for epoch in range(num_epochs):
                 print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
@@ -247,8 +257,6 @@ class Music:
                     x_train, y_train = shuffle(x_train, y_train)  # Check if it this shuffles correctly maybe
 
                 total_loss = 0
-                total_bpc = 0
-                total_perplexity = 0
 
                 start_time = time.time()
 
@@ -268,40 +276,23 @@ class Music:
                     }
 
                     if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                        s, _, l, p, b = sess.run([merged_summary,
-                                                                 self.optimizer,
-                                                                 self.loss,
-                                                                 self.perplexity,
-                                                                 self.bpc],
-                                                                feed_dict=feed_dict)
+                        s, _, l = sess.run([merged_summary, self.optimizer, self.loss], feed_dict=feed_dict)
 
                         train_writer.add_summary(s, i + epoch * num_batches)
                     else:
-                        _, l, p, b = sess.run([self.optimizer,
-                                                              self.loss,
-                                                              self.perplexity,
-                                                              self.bpc],
-                                                             feed_dict=feed_dict)
+                        _, l = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
 
                     total_loss += l
-                    if i == 0:
-                        total_bpc = b
-                        total_perplexity = p
-                    else:
-                        total_bpc = (total_bpc * i + b) / (i + 1)
-                        total_perplexity = (total_perplexity * i + p) / (i + 1)
 
                     if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                             or i == num_batches - 1:
-                        print(f"Step {i + 1} of {num_batches} | Loss: {l}, Perplexity: {p}, BPC: {b},"
-                              f" TimeFromStart: {time.time() - start_time}")
+                        print(f"Step {i + 1} of {num_batches} | Loss: {l}, TimeFromStart: {time.time() - start_time}")
 
-                print(f"   Epoch {epoch + 1} | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc},"
-                      f" TimeSpent: {time.time() - start_time}")
+                print(f"   Epoch {epoch + 1} | Loss: {total_loss}, TimeSpent: {time.time() - start_time}")
 
-                epoch_bpc_summary = tf.Summary()
-                epoch_bpc_summary.value.add(tag='epoch_bpc', simple_value=total_bpc)
-                train_writer.add_summary(epoch_bpc_summary, epoch + 1)
+                epoch_nll_summary = tf.Summary()
+                epoch_nll_summary.value.add(tag='epoch_nll', simple_value=total_loss)
+                train_writer.add_summary(epoch_nll_summary, epoch + 1)
 
                 if valid_data is not None:
                     print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
@@ -311,8 +302,6 @@ class Music:
                     num_validation_batches = len(x_valid) // batch_size
 
                     total_val_loss = 0
-                    total_val_bpc = 0
-                    total_val_perplexity = 0
 
                     start_time = time.time()
 
@@ -331,52 +320,43 @@ class Music:
                             self.training: False
                         }
 
-                        l, p, b = sess.run([self.loss, self.perplexity, self.bpc], feed_dict=feed_dict)
+                        l = sess.run([self.loss], feed_dict=feed_dict)
 
                         total_val_loss += l
-                        if i == 0:
-                            total_val_bpc = b
-                            total_val_perplexity = p
-                        else:
-                            total_val_bpc = (total_val_bpc * i + b) / (i + 1)
-                            total_val_perplexity = (total_val_perplexity * i + p) / (i + 1)
 
                         if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                                 or i == num_validation_batches - 1:
                             print(f"Step {i + 1} of {num_validation_batches} | Loss: {total_val_loss},"
-                                  f" Perplexity: {total_val_perplexity}, BPC: {total_val_bpc},"
                                   f" TimeFromStart: {time.time() - start_time}")
 
-                    print(f"Final validation stats | Loss: {total_val_loss}, Perplexity: {total_val_perplexity},"
-                          f" BPC: {total_val_bpc},"
-                          f" TimeSpent: {time.time() - start_time}")
+                    print(f"Final validation stats | Loss: {total_val_loss}, TimeSpent: {time.time() - start_time}")
 
-                    epoch_bpc_summary = tf.Summary()
-                    epoch_bpc_summary.value.add(tag='epoch_bpc', simple_value=total_val_bpc)
-                    validation_writer.add_summary(epoch_bpc_summary, epoch + 1)
+                    epoch_nll_summary = tf.Summary()
+                    epoch_nll_summary.value.add(tag='epoch_nll', simple_value=total_val_loss)
+                    validation_writer.add_summary(epoch_nll_summary, epoch + 1)
                     validation_writer.flush()
 
-                    '''Here the training and validation epoch have been run, now get the lowest validation bpc model'''
-                    # Check if validation perplexity was better
-                    if best_validation_bpc is None or total_val_bpc < best_validation_bpc:
-                        print(f"&&& New best validation bpc - before: {best_validation_bpc};"
-                              f" after: {total_val_bpc} - saving model...")
+                    '''Here the training and validation epoch have been run, now get the lowest validation loss model'''
+                    # Check if validation loss was better
+                    if best_validation_loss is None or total_val_loss < best_validation_loss:
+                        print(f"&&& New best validation loss - before: {best_validation_loss};"
+                              f" after: {total_val_loss} - saving model...")
 
-                        best_validation_bpc = total_val_bpc
+                        best_validation_loss = total_val_loss
 
                         # Save checkpoint
                         saver = tf.compat.v1.train.Saver()
                         saver.save(sess, ckpt_path + model_name + ".ckpt")
 
                         epochs_no_gain = 0
-                    elif break_epochs_no_gain >= 1:  # Validation BPC was worse. Check if break_epochs_no_gain is on
+                    elif break_epochs_no_gain >= 1:  # Validation loss was worse. Check if break_epochs_no_gain is on
                         epochs_no_gain += 1
 
-                        print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs,"
+                        print(f"&&& No validation loss decrease for {epochs_no_gain} epochs,"
                               f" breaking at {break_epochs_no_gain} epochs.")
 
                         if epochs_no_gain == break_epochs_no_gain:
-                            print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
+                            print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
                             break  # Probably return would do the same thing (for now)
             # Training ends here
             '''We used to save here – model saved after the last epoch'''
@@ -402,8 +382,6 @@ class Music:
             num_batches = len(x_test) // batch_size
 
             total_loss = 0
-            total_bpc = 0
-            total_perplexity = 0
 
             start_time = time.time()
 
@@ -423,22 +401,15 @@ class Music:
                     self.training: False
                 }
 
-                l, p, b = sess.run([self.loss, self.perplexity, self.bpc], feed_dict=feed_dict)
+                l = sess.run([self.loss], feed_dict=feed_dict)
 
                 total_loss += l
-                if i == 0:
-                    total_bpc = b
-                    total_perplexity = p
-                else:
-                    total_bpc = (total_bpc * i + b) / (i + 1)
-                    total_perplexity = (total_perplexity * i + p) / (i + 1)
 
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                         or i == num_batches - 1:
-                    print(f"Step {i + 1} of {num_batches} | Loss: {total_loss}, Perplexity: {total_perplexity},"
-                          f" BPC: {total_bpc}, TimeFromStart: {time.time() - start_time}")
-            print(f"Final testing stats | Loss: {total_loss}, Perplexity: {total_perplexity}, BPC: {total_bpc},"
-                  f" TimeSpent: {time.time() - start_time}")
+                    print(f"Step {i + 1} of {num_batches} | Loss: {total_loss},"
+                          f" TimeFromStart: {time.time() - start_time}")
+            print(f"Final testing stats | Loss: {total_loss}, TimeSpent: {time.time() - start_time}")
 
 
 def find_optimal_hidden_units():
@@ -460,10 +431,10 @@ def find_optimal_hidden_units():
         global hidden_units
         hidden_units = units
 
-        # Before we used "test_model = Music()" and in the end "del test_model", but it doesn't seem to help, but
+        # Before we used "test_model = MusicModel()" and in the end "del test_model", but it doesn't seem to help, but
         # If some time later you get some memory error, you can probably try this
 
-        Music()
+        MusicModel()
 
         # Get the number of parameters in the current model
         trainable_variables = tf.trainable_variables()
@@ -530,7 +501,7 @@ if __name__ == '__main__':  # Main function
 
     hidden_units = find_optimal_hidden_units()
 
-    model = Music()  # Create the model
+    model = MusicModel()  # Create the model
 
     model.fit(TRAIN_DATA, VALID_DATA)  # Train the model (validating after each epoch)
 

@@ -1,10 +1,40 @@
 # RRU – Residual Recurrent Unit
 
-This is project is made for creating an environment in which we can test the performance of our RRU cell against it's competitors – GRU, LSTM, MogrifierLSTM
+This is project is made for creating an environment in which we can test the performance of our RRU cell against it's
+competitors – GRU, LSTM, MogrifierLSTM
 
 ## Usage
 
-DISCLAIMER: Parts of this project may work with your current environment (especially if you comment out MogrifierLSTM code)
+### 1. Download the data sets (177 MB total)
+
+To get the data sets, you must run get_data.sh.
+
+P.S.: If you are on Windows, it might be a little tricky and not work, in that case you can use WSL, etc.
+Code if you use WSL:
+```
+cd '/mnt/c/Users/YOUR PATH/RRU'
+bash get_data.sh
+```
+	
+When I added these files to git, it threw a message "warning: LF will be replaced by CRLF in get_data.sh.
+", so I hope the script still works.
+
+Language modeling data sets downloaded from:
+
+http://mattmahoney.net/dc/textdata
+
+and
+
+http://www.fit.vutbr.cz/~imikolov/rnnlm/ .
+
+Music modeling data sets downloaded from:
+
+http://www-etud.iro.umontreal.ca/~boulanni/icml2012 .
+
+### 2. Prepare your environment
+
+DISCLAIMER: Parts of this project may work with your current TensorFlow environment (especially if you comment
+out MogrifierLSTM code)
 
 1 – Install Anaconda (if you do not have it yet)
 
@@ -30,14 +60,14 @@ source .bashrc
 
 2 - Create a new conda environment and activate it
 
-a) "test_mogrifier" environment with some things installed
+a) "RRU" environment with some things installed
 ```
-conda create -n test_mogrifier python=3.6.9 numpy scipy
+conda create -n RRU python=3.6.9 numpy scipy
 ```
 
 b) Activate the environment
 ```
-conda activate test_mogrifier
+conda activate RRU
 ```
 
 3 – Install the remaining requirements
@@ -45,71 +75,33 @@ conda activate test_mogrifier
 conda install cudatoolkit
 conda install cudnn
 conda install tensorflow-gpu=1.15
-/root/anaconda3/envs/test_mogrifier/bin/pip3 install sklearn
-/root/anaconda3/envs/test_mogrifier/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
+/root/anaconda3/envs/RRU/bin/pip3 install sklearn
+/root/anaconda3/envs/RRU/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
+/root/anaconda3/envs/RRU/bin/pip3 install tensorflow_datasets==3
 ```
 
-4 – You might have to download the data, if you haven't done it yet (depends on the task)
-
-You can see the instructions for each task below.
-
-5 – Run the experiments (change the inner configuration if you wish)
-```
-python3 -u lm_efficient_main.py
-```
-
-## Tasks
-
-### Language modeling
-
-#### Newest way (less memory usage)
-
-1 - To get the data, you must run lm_get_data.sh
-
-If you are on Windows, it might be a little tricky and not work, in that case you can use WSL, etc.:
-```
-cd '/mnt/c/Users/YOUR PATH/RRU'
-bash lm_get_data.sh
-```
-	
-When I added these files to git, it threw message "warning: LF will be replaced by CRLF in get_data.sh.
-", so I hope the script still works.
-
-2 - To prepare the data, you must run lm_efficient_utils.py
-
-You can change vocabulary_size for it in the main function, then you have to run it, for it to save them.
-
-3 - To start training/validation/testing, run lm_efficient_main.py
-
-Change hyperparameters inside to run different data sets, possibilites at the moment: enwik8, text8, penn, pennchar, defaultly picks enwik8
-
-#### Old way (more memory usage)
-
-1 - To get the data, you must run lm_get_data.sh
-
-If you are on Windows, it might be a little tricky and not work, in that case you can use WSL, etc.:
-```
-cd '/mnt/c/Users/YOUR PATH/RRU'
-bash lm_get_data.sh
-```
-	
-When I added these files to git, it threw message "warning: LF will be replaced by CRLF in get_data.sh.
-", so I hope the script still works.
-
-2 - To prepare the data, you must run lm_utils.py
-
-You can change vocabulary_size, window_size, step_size for it in main function, then you have to run it, for it to save it.
-
-3 - To start training/validation/testing, run lm_main.py
-
-Change hyperparameters inside to run different data sets, possiblites atm: enwik8, text8, penn, pennchar, defaultly picks enwik8
+### 3. Run the experiments (change the inner configuration if you wish)
 
 ### IMDB Sentiment Analysis
 
-#### Newest way (Easy to run other cells)
+1 – Run imdb_main.py
 
-Run cell_network.py
+### Language modeling
 
-#### Old way (LSTM programmed by hand, so harder to run other cells)
+1 - To prepare the data, you must run lm_utils.py
 
-Run LSTM_with_tf_scan.py
+You can change vocabulary_size for it in the main function, then you have to run it, for it to save them.
+
+2 - To start training/validation/testing, run lm_main.py
+
+Change hyperparameters inside to run different data sets, possibilities at the moment: enwik8, text8,
+penn (Penn Treebank word-level), pennchar (Penn Treebank character-level)
+
+### Music modeling
+
+1 - To prepare the data, you must run music_utils.py
+
+2 - To start training/validation/testing, run music_main.py
+
+Change hyperparameters inside to run different data sets, possibilities at the moment: "JSB Chorales", "MuseData",
+"Nottingham", "Piano-midi.de".
