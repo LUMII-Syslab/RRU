@@ -171,29 +171,9 @@ class MusicModel:
         # [batch_size, window_size, vocabulary_size] -> [batch_size x window_size, vocabulary_size]
         labels = tf.reshape(y, shape=(-1, vocabulary_size))
 
-        ''' Here I will try to create NLL loss '''
-        # y holds the correct pitches at each time, we need to get reverse, that is [1,0,1]->[0,1,0]
-        casted_y = tf.dtypes.cast(y, tf.int8)
-        reversed_casted_y = tf.bitwise.invert(casted_y)
-        reversed_y = tf.dtypes.cast(reversed_casted_y, tf.float32)
-        # Now we have everything to calculate the loss
-        # We want to take negative natural logarithm from our predictions, where the correct answers were
-        # So we need 2 things:
-        # 1. Where y had 1, we must take natural logarithm from prediction
-        # 2. Where y had 0, we must we need to put 1, because y = log e (x) = log e (1) = 0
-        # Reshape our prediction, so it matches y shape - [batch_size, window_size, vocabulary_size]
-        reshaped_prediction = tf.reshape(prediction, shape=(-1, window_size, vocabulary_size))
-        # We only keep the prediction values where y was true, example:
-        # prediction = [0.32,0.65.0.88] and y = [0,1,0] -> nll_first = [0,0.65,0]
-        nll_prediction = reshaped_prediction * y
-        # Now where y was 0 we need to add 1, we do this by getting the reversed y, as I did above
-        nll_prediction = nll_prediction + reversed_y
-        nll_matrix = -tf.math.log(nll_prediction)  # y = log e (x)
-        loss = tf.reduce_sum(nll_matrix) / tf.dtypes.cast(current_batch_size, tf.float32)
-        tf.summary.scalar("nll", loss)
-        ''' Regular way Calculate the loss given prediction and labels '''
-        # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=prediction, labels=labels))
-        # tf.summary.scalar("loss", loss)
+        # Calculate NLL loss
+        loss = tf.reduce_mean(tf.losses.sigmoid_cross_entropy(logits=prediction, multi_class_labels=labels))
+        tf.summary.scalar("loss", loss)
 
         # Printing trainable variables which have "kernel" in their name
         decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
