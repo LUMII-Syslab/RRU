@@ -24,7 +24,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "GRU"  # Here you can type in the name of the cell you want to use
+cell_name = "RRU5"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -49,14 +49,7 @@ elif cell_name == "RRU3":  # Gated version with 2 transformations
     has_training_bool = True
     model_name = 'grru2_model'
 
-elif cell_name == "RRU4":  # Gated version with 2 transformations and a separate output size
-    from cells.GatedRRUCell2_a import RRUCell
-    cell_fn = RRUCell
-    has_training_bool = True
-    output_size = 256
-    model_name = 'grru2a_model'
-
-elif cell_name == "RRU5":  # Gated version with separate output size
+elif cell_name == "RRU4":  # Gated version with separate output size
     from cells.GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
     has_training_bool = True

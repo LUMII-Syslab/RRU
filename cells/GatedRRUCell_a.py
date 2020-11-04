@@ -21,11 +21,9 @@ from tensorflow.python.keras.utils import tf_utils
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import math_ops
-from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops.rnn_cell_impl import LayerRNNCell
 from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.util import nest
-from tensorflow.python.util.deprecation import deprecated
 
 _BIAS_VARIABLE_NAME = "bias"
 _WEIGHTS_VARIABLE_NAME = "kernel"
@@ -35,9 +33,9 @@ def inv_sigmoid(y):
     return np.log(y / (1 - y))
 
 
-#residual_weight = 0.95  # r
-#candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
-#S_initial_value = inv_sigmoid(residual_weight)
+# residual_weight = 0.95  # r
+# candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
+# S_initial_value = inv_sigmoid(residual_weight)
 
 
 class RRUCell(LayerRNNCell):
@@ -74,9 +72,10 @@ class RRUCell(LayerRNNCell):
                  group_size=32,
                  activation=None,
                  reuse=None,
-                 training=True,
+                 z_transformations=2,
+                 training=False,
                  dropout_rate=0.2,
-                 residual_weight_initial_value=0.95,  # in range (0 - 1]
+                 residual_weight_initial_value=0.95,  # In range (0 - 1]
                  name=None,
                  dtype=None,
                  **kwargs):
@@ -100,6 +99,7 @@ class RRUCell(LayerRNNCell):
         self._kernel_initializer = None
         self._bias_initializer = tf.zeros_initializer()
         self._group_size = group_size
+        self._z_transformations = z_transformations
         self._training = training
         self._dropout_rate = dropout_rate
         assert residual_weight_initial_value > 0 and residual_weight_initial_value <= 1
@@ -111,7 +111,7 @@ class RRUCell(LayerRNNCell):
 
     @property
     def output_size(self):
-        #return self._output_size+self._num_units*2
+        # return self._output_size+self._num_units*2
         return self._output_size
 
     @tf_utils.shape_type_conversion
@@ -122,14 +122,38 @@ class RRUCell(LayerRNNCell):
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
         n_middle_maps = 2 * total  # TODO: find the optimal value
-        self._Z_kernel = self.add_variable(
+        self._Z_kernel = []
+        self._Z_bias = []
+        for i in range(self._z_transformations):
+            if i == 0:  # The first Z transformation has different shape
+                z_kernel = self.add_variable(
+                    "Z/%s" % _WEIGHTS_VARIABLE_NAME,
+                    shape=[total, n_middle_maps],
+                    initializer=self._kernel_initializer)
+                z_bias = self.add_variable(
+                    "Z/%s" % _BIAS_VARIABLE_NAME,
+                    shape=[n_middle_maps],
+                    initializer=self._bias_initializer)
+            else:
+                z_kernel = self.add_variable(
+                    f"Z{i + 1}/%s" % _WEIGHTS_VARIABLE_NAME,
+                    shape=[n_middle_maps, n_middle_maps],
+                    initializer=self._kernel_initializer)
+                z_bias = self.add_variable(
+                    f"Z{i + 1}/%s" % _BIAS_VARIABLE_NAME,
+                    shape=[n_middle_maps],
+                    initializer=self._bias_initializer)
+            self._Z_kernel.append(z_kernel)
+            self._Z_bias.append(z_bias)
+        # Single _Z_kernel and _Z_bias, without no lists
+        '''self._Z_kernel = self.add_variable(
             "Z/%s" % _WEIGHTS_VARIABLE_NAME,
             shape=[total, n_middle_maps],
             initializer=self._kernel_initializer)
         self._Z_bias = self.add_variable(
             "Z/%s" % _BIAS_VARIABLE_NAME,
             shape=[n_middle_maps],
-            initializer=self._bias_initializer)
+            initializer=self._bias_initializer)'''
         self.S_bias_variable = self.add_variable(
             "S/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
@@ -155,8 +179,8 @@ class RRUCell(LayerRNNCell):
         #
         # self.candidate_weight = self.add_variable(  # TODO: check if needed
         #     "cand_weight/%s"% _BIAS_VARIABLE_NAME,
-        #     shape=(),
-        #     initializer=tf.constant_initializer(1.0))
+        #     shape=(),  # (self._num_units)
+        #     initializer=tf.constant_initializer(1.0))  # (0.25)
 
         self.built = True
 
@@ -169,51 +193,57 @@ class RRUCell(LayerRNNCell):
         else:
             dropout_rate = 0.
 
-        #inputs = instance_norm(inputs)
+        # inputs = instance_norm(inputs)
         # LOWER PART OF THE CELL
         # Concatenate input and last state
         # state_drop = tf.nn.dropout(state, rate = dropout_rate)
         state_drop = state
         input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
-        #input_and_state = tf.nn.dropout(input_and_state, rate=dropout_rate)
+        # input_and_state = tf.nn.dropout(input_and_state, rate=dropout_rate)
 
-        # Go through first transformation – Z
-        after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
+        z_start = input_and_state  # This will hold the info that Z transformation has to transform
+        # Go through first transformation(s) – Z
+        for i in range(self._z_transformations):
+            # Multiply the matrices
+            after_z = math_ops.matmul(z_start, self._Z_kernel[i]) + self._Z_bias[i]
 
-        # Do group normalization
-        # group_size = self._group_size
-        # # Do normalization
-        # if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
-        #     # Do instance normalization
-        #     after_norm = instance_norm(after_z)
-        # else:
-        #     # Do group normalization
-        #     after_norm = group_norm(after_z, group_size)
+            if i == 0:  # For the first Z transformation do normalization (that's what we did for 2_a)
+                # 1. Do group normalization
+                # group_size = self._group_size
+                # # Do normalization
+                # if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
+                #     # Do instance normalization
+                #     after_norm = instance_norm(after_z)
+                # else:
+                #     # Do group normalization
+                #     after_norm = group_norm(after_z, group_size)
+                # Or 2. Do instance normalization
+                after_z = instance_norm(after_z)
 
-        # Do instance normalization
-        after_norm = instance_norm(after_z)
+            # 1. Do GELU activation
+            after_activation = gelu(after_z)
+            # Or 2. Do ReLU activation
+            # after_activation = tf.nn.relu(after_norm)
 
-        # Do GELU activation
-        after_gelu = gelu(after_norm)
-        after_gelu = tf.nn.dropout(after_gelu, rate=dropout_rate)
-        # Do ReLU activation
-        # after_gelu = tf.nn.relu(after_norm)
+            z_start = after_activation
+
+        after_gelu = tf.nn.dropout(z_start, rate=dropout_rate)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
-        #after_w, gate = tf.split(after_w, 2, axis=-1)
-        candidate = after_w[:,0:self._num_units]*0.25#*self.candidate_weight
+        # after_w, gate = tf.split(after_w, 2, axis=-1)
+        candidate = after_w[:,0:self._num_units]*0.25  # * self.candidate_weight
         gate = after_w[:, self._num_units:2*self._num_units]
         output = after_w[:, 2*self._num_units:]
         gate = tf.sigmoid(gate+1)
 
         # Merge upper and lower parts
-        #final_state = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
-        #final_state = state * self.S_bias + after_w * self._W_mul#*np.sqrt(1.0/200)
+        # final_state = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
+        # final_state = state * self.S_bias + after_w * self._W_mul#*np.sqrt(1.0/200)
         final_state = state*gate+candidate*(1-gate)
-        #final_state = state * gate + candidate * tf.sqrt(1 - tf.square(gate) + 1e-8)
+        # final_state = state * gate + candidate * tf.sqrt(1 - tf.square(gate) + 1e-8)
 
-        #return tf.concat([output, gate, candidate], axis=-1), final_state
+        # return tf.concat([output, gate, candidate], axis=-1), final_state
         return output, final_state
 
     def zero_state(self, batch_size, dtype):
@@ -264,8 +294,8 @@ def gelu(x):
 
 
 def group_norm(cur, group_size):
-    shape = tf.shape(cur) # runtime shape
-    n_units = cur.get_shape().as_list()[-1] # static shape
+    shape = tf.shape(cur)  # Runtime shape
+    n_units = cur.get_shape().as_list()[-1]  # Static shape
     n_groups = n_units//group_size
     assert group_size*n_groups == n_units
     cur = tf.reshape(cur, [-1]+[n_groups]+[group_size])

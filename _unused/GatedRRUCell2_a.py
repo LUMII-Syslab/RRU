@@ -75,7 +75,7 @@ class RRUCell(LayerRNNCell):
                  activation=None,
                  reuse=None,
                  training=True,
-                 dropout_rate=0.0,
+                 dropout_rate=0.2,
                  residual_weight_initial_value=0.95,  # in range (0 - 1]
                  name=None,
                  dtype=None,
@@ -158,17 +158,6 @@ class RRUCell(LayerRNNCell):
             shape=(),
             initializer=tf.zeros_initializer())
 
-        self.prev_state_weight = self.add_variable( #todo: check if needed
-            "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
-            shape=(),
-            initializer=tf.ones_initializer())
-
-        self.candidate_weight = self.add_variable(  # TODO: check if needed
-            "cand_weight/%s"% _BIAS_VARIABLE_NAME,
-            shape=(self._num_units),
-            initializer=tf.constant_initializer(0.25))
-
-
         self.built = True
 
     def call(self, inputs, state):
@@ -193,6 +182,7 @@ class RRUCell(LayerRNNCell):
         after_gelu = math_ops.matmul(after_gelu, self._Z_kernel2) + self._Z_bias2
         #after_gelu = instance_norm(after_gelu)
         after_gelu = gelu(after_gelu)
+        after_gelu = tf.nn.dropout(after_gelu, rate=dropout_rate)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
