@@ -81,7 +81,7 @@ else:
 # Hyperparameters
 # Data parameters
 # Choose on of "JSB Chorales" | "MuseData" | "Nottingham" | "Piano-midi.de" (which data set to test on)
-data_set_name = "JSB Chorales"
+data_set_name = "Nottingham"
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
 window_size = 200  # If you have a lot of resources you can run this on full context size – 160/3780/1793/3623
 step_size = window_size // 2
@@ -89,10 +89,10 @@ batch_size = 16  # 64
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 shuffle_data = True  # Should we shuffle the samples?
 # Training
-num_epochs = 3  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
+num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 break_epochs_no_gain = 3  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
-hidden_units = 1024  # This will only be used if the number_of_parameters is None or < 1
-number_of_parameters = 24000000  # 24 million learnable parameters
+hidden_units = 128 * 3  # This will only be used if the number_of_parameters is None or < 1
+number_of_parameters = 1000000  # 1 million learnable parameters
 learning_rate = 0.001
 number_of_layers = 2
 
@@ -103,7 +103,7 @@ log_path = 'logdir_music/'
 log_after_this_many_steps = 0
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
 # After how many steps should we print the results of training/validating/testing (0 – don't print until the last step)
-print_after_this_many_steps = 1
+print_after_this_many_steps = 10
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -172,7 +172,13 @@ class MusicModel:
         labels = tf.reshape(y, shape=(-1, vocabulary_size))
 
         # Calculate NLL loss
-        loss = tf.reduce_mean(tf.losses.sigmoid_cross_entropy(logits=prediction, multi_class_labels=labels))
+        # loss = tf.reduce_mean(tf.losses.sigmoid_cross_entropy(logits=prediction, multi_class_labels=labels))
+        # maybe this will be more correct
+        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=prediction, labels=labels)
+        # loss = tf.losses.sigmoid_cross_entropy(logits=prediction, multi_class_labels=labels)
+        # loss = tf.reshape(loss, shape=(current_batch_size, window_size, -1))
+        loss = tf.reduce_sum(loss, -1)
+        loss = tf.reduce_mean(loss)
         tf.summary.scalar("loss", loss)
 
         # Printing trainable variables which have "kernel" in their name
@@ -268,10 +274,11 @@ class MusicModel:
                             or i == num_batches - 1:
                         print(f"Step {i + 1} of {num_batches} | Loss: {l}, TimeFromStart: {time.time() - start_time}")
 
-                print(f"   Epoch {epoch + 1} | Loss: {total_loss}, TimeSpent: {time.time() - start_time}")
+                average_loss = total_loss / num_batches
+                print(f"   Epoch {epoch + 1} | Average loss: {average_loss}, TimeSpent: {time.time() - start_time}")
 
                 epoch_nll_summary = tf.Summary()
-                epoch_nll_summary.value.add(tag='epoch_nll', simple_value=total_loss)
+                epoch_nll_summary.value.add(tag='epoch_nll', simple_value=average_loss)
                 train_writer.add_summary(epoch_nll_summary, epoch + 1)
 
                 if valid_data is not None:
@@ -300,29 +307,32 @@ class MusicModel:
                             self.training: False
                         }
 
-                        l = sess.run([self.loss], feed_dict=feed_dict)
+                        l = sess.run(self.loss, feed_dict=feed_dict)
 
                         total_val_loss += l
 
                         if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                                 or i == num_validation_batches - 1:
-                            print(f"Step {i + 1} of {num_validation_batches} | Loss: {total_val_loss},"
-                                  f" TimeFromStart: {time.time() - start_time}")
+                            print(f"Step {i + 1} of {num_validation_batches} | "
+                                  f"Average loss: {total_val_loss / (i + 1)}, "
+                                  f"TimeFromStart: {time.time() - start_time}")
 
-                    print(f"Final validation stats | Loss: {total_val_loss}, TimeSpent: {time.time() - start_time}")
+                    average_val_loss = total_val_loss / num_validation_batches
+                    print(f"Final validation stats | Average loss: {average_val_loss}, "
+                          f"TimeSpent: {time.time() - start_time}")
 
                     epoch_nll_summary = tf.Summary()
-                    epoch_nll_summary.value.add(tag='epoch_nll', simple_value=total_val_loss)
+                    epoch_nll_summary.value.add(tag='epoch_nll', simple_value=average_val_loss)
                     validation_writer.add_summary(epoch_nll_summary, epoch + 1)
                     validation_writer.flush()
 
                     '''Here the training and validation epoch have been run, now get the lowest validation loss model'''
                     # Check if validation loss was better
-                    if best_validation_loss is None or total_val_loss < best_validation_loss:
+                    if best_validation_loss is None or average_val_loss < best_validation_loss:
                         print(f"&&& New best validation loss - before: {best_validation_loss};"
-                              f" after: {total_val_loss} - saving model...")
+                              f" after: {average_val_loss} - saving model...")
 
-                        best_validation_loss = total_val_loss
+                        best_validation_loss = average_val_loss
 
                         # Save checkpoint
                         saver = tf.compat.v1.train.Saver()
@@ -381,15 +391,16 @@ class MusicModel:
                     self.training: False
                 }
 
-                l = sess.run([self.loss], feed_dict=feed_dict)
+                l = sess.run(self.loss, feed_dict=feed_dict)
 
                 total_loss += l
 
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                         or i == num_batches - 1:
-                    print(f"Step {i + 1} of {num_batches} | Loss: {total_loss},"
+                    print(f"Step {i + 1} of {num_batches} | Average loss: {total_loss / (i + 1)},"
                           f" TimeFromStart: {time.time() - start_time}")
-            print(f"Final testing stats | Loss: {total_loss}, TimeSpent: {time.time() - start_time}")
+            average_loss = total_loss / num_batches
+            print(f"Final testing stats | Average loss: {average_loss}, TimeSpent: {time.time() - start_time}")
 
 
 def find_optimal_hidden_units():
