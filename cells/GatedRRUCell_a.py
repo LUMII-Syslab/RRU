@@ -227,10 +227,10 @@ class RRUCell(LayerRNNCell):
 
             z_start = after_activation
 
-        after_gelu = tf.nn.dropout(z_start, rate=dropout_rate)
+        after_dropout = tf.nn.dropout(z_start, rate=dropout_rate)
 
         # Go through the second transformation - W
-        after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
+        after_w = math_ops.matmul(after_dropout, self._W_kernel) + self._W_bias
         # after_w, gate = tf.split(after_w, 2, axis=-1)
         candidate = after_w[:,0:self._num_units]*0.25  # * self.candidate_weight
         gate = after_w[:, self._num_units:2*self._num_units]

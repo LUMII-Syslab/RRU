@@ -27,7 +27,7 @@ from utils import print_trainable_variables
 from adam_decay import AdamOptimizer_decay
 
 # Choose your cell
-cell_name = "RRU4"  # Here you can type in the name of the cell you want to use
+cell_name = "RRU3"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -44,15 +44,9 @@ elif cell_name == "RRU2":  # Gated version with 1 transformation
     from cells.GatedRRUCell import RRUCell  # (I already have some results with this one)
     cell_fn = RRUCell
     has_training_bool = True
-    model_name = 'grru1_model'
+    model_name = 'grru_model'
 
-elif cell_name == "RRU3":  # Gated version with 2 transformations
-    from cells.GatedRRUCell2 import RRUCell
-    cell_fn = RRUCell
-    has_training_bool = True
-    model_name = 'grru2_model'
-
-elif cell_name == "RRU4":  # Gated version with separate output size
+elif cell_name == "RRU3":  # Gated version with separate output size
     from cells.GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
     has_training_bool = True

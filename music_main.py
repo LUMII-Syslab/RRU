@@ -38,15 +38,9 @@ elif cell_name == "RRU2":  # Gated version with 1 transformation
     from cells.GatedRRUCell import RRUCell  # (I already have some results with this one)
     cell_fn = RRUCell
     has_training_bool = True
-    model_name = 'grru1_model'
+    model_name = 'grru_model'
 
-elif cell_name == "RRU3":  # Gated version with 2 transformations
-    from cells.GatedRRUCell2 import RRUCell
-    cell_fn = RRUCell
-    has_training_bool = True
-    model_name = 'grru2_model'
-
-elif cell_name == "RRU4":  # Gated version with separate output size
+elif cell_name == "RRU3":  # Gated version with separate output size
     from cells.GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
     has_training_bool = True
