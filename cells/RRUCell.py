@@ -75,7 +75,7 @@ class RRUCell(LayerRNNCell):
                  activation=None,
                  reuse=None,
                  training=True,
-                 dropout_rate=0.1,
+                 dropout_rate=0.2,
                  residual_weight_initial_value=0.95,  # in range (0 - 1]
                  name=None,
                  dtype=None,

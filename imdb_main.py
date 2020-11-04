@@ -24,7 +24,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "RRU5"  # Here you can type in the name of the cell you want to use
+cell_name = "RRU3"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -87,10 +87,10 @@ fixed_batch_size = False
 ckpt_path = 'ckpt_imdb/'
 log_path = 'logdir_imdb/'
 
-# After how many steps should we send the data to TensorBoard (0 – don't log after any amount of steps)
+# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
-# After how many steps should we print the results of training/validating/testing (0 – don't print until the last step)
+# After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
 print_after_this_many_steps = 100
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 

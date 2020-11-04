@@ -44,9 +44,9 @@ def find_optimal_hidden_units(hidden_units, number_of_parameters, model_function
         if m is None:
             print(f"Hidden units = {hidden_count}, number of trainable parameters = None BAD")
         elif correct:
-            print(f"Hidden units = {hidden_count}, number of trainable parameters = {m} GOOD")
+            print(f"Hidden units = {hidden_count}, number of trainable parameters = {int(m)} GOOD")
         else:
-            print(f"Hidden units = {hidden_count}, number of trainable parameters = {m} BAD")
+            print(f"Hidden units = {hidden_count}, number of trainable parameters = {int(m)} BAD")
         return correct, m
 
     # Double the size until it's too large.
@@ -58,7 +58,7 @@ def find_optimal_hidden_units(hidden_units, number_of_parameters, model_function
         hidden_size = max(hidden_size + 1, int(hidden_size * math.sqrt(1.2 * number_of_parameters / n)))
         good, n = is_good(hidden_size)
 
-    # Find the real answer in the range – [previous_hidden_size, hidden_size] range
+    # Find the real answer in the range - [previous_hidden_size, hidden_size] range
     def find_answer(lower, upper):
         while lower < upper - 1:  # While the difference is bigger than 1
             # The number of parameters is likely to be at least quadratic in

@@ -77,9 +77,9 @@ else:
 # Data parameters
 data_set_name = "pennchar"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
-window_size = 512  # Enwik8 – 512. Text8 512?, PTB word-level 70?, PTB character-level 150?
+window_size = 512  # Enwik8 - 512. Text8 512?, PTB word-level 70?, PTB character-level 150?
 step_size = window_size // 2
-batch_size = 64  # Enwik8 – 64. PTB character-level 128?
+batch_size = 64  # Enwik8 - 64. PTB character-level 128?
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 continuous_batches = True  # Batches go continuously, this might give performance boost with a stateful RNN cell
 shuffle_data = False  # Should we shuffle the samples?
@@ -97,10 +97,10 @@ zero_state_chance = 0.1  # Chance that zero_state is passed instead of last stat
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
 
-# After how many steps should we send the data to TensorBoard (0 – don't log after any amount of steps)
+# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
-# After how many steps should we print the results of training/validating/testing (0 – don't print until the last step)
+# After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
 print_after_this_many_steps = 1
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
@@ -553,7 +553,7 @@ class LMModel:
                             print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
                             break  # Probably return would do the same thing (for now)
             # Training ends here
-            '''We used to save here – model saved after the last epoch'''
+            '''We used to save here - model saved after the last epoch'''
             # Save checkpoint
             # saver = tf.compat.v1.train.Saver()
             # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model

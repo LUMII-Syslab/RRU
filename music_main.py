@@ -22,7 +22,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "GRU"  # Here you can type in the name of the cell you want to use
+cell_name = "RRU3"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -70,7 +70,7 @@ else:
 # Choose on of "JSB Chorales" | "MuseData" | "Nottingham" | "Piano-midi.de" (which data set to test on)
 data_set_name = "Nottingham"
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
-window_size = 200  # If you have a lot of resources you can run this on full context size – 160/3780/1793/3623
+window_size = 200  # If you have a lot of resources you can run this on full context size - 160/3780/1793/3623
 step_size = window_size // 2
 batch_size = 16  # 64
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
@@ -86,10 +86,10 @@ number_of_layers = 2
 ckpt_path = 'ckpt_music/'
 log_path = 'logdir_music/'
 
-# After how many steps should we send the data to TensorBoard (0 – don't log after any amount of steps)
+# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
-# After how many steps should we print the results of training/validating/testing (0 – don't print until the last step)
+# After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
 print_after_this_many_steps = 10
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
@@ -336,7 +336,7 @@ class MusicModel:
                             print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
                             break  # Probably return would do the same thing (for now)
             # Training ends here
-            '''We used to save here – model saved after the last epoch'''
+            '''We used to save here - model saved after the last epoch'''
             # Save checkpoint
             # saver = tf.compat.v1.train.Saver()
             # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model
@@ -444,7 +444,7 @@ def find_optimal_hidden_units():
         hidden_size = max(hidden_size + 1, int(hidden_size * math.sqrt(1.2 * number_of_parameters / n)))
         good, n = is_good(hidden_size)
 
-    # Find the real answer in the range – [previous_hidden_size, hidden_size] range
+    # Find the real answer in the range - [previous_hidden_size, hidden_size] range
     def find_answer(lower, upper):
         while lower < upper - 1:  # While the difference is bigger than 1
             # The number of parameters is likely to be at least quadratic in

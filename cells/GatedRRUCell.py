@@ -72,7 +72,7 @@ class RRUCell(LayerRNNCell):
                  activation=None,
                  reuse=None,
                  training=False,
-                 z_transformations=2,
+                 z_transformations=1,
                  dropout_rate=0.2,
                  residual_weight_initial_value=0.95,  # In range (0 - 1]
                  name=None,
@@ -192,7 +192,7 @@ class RRUCell(LayerRNNCell):
         input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
 
         z_start = input_and_state  # This will hold the info that Z transformation has to transform
-        # Go through first transformation(s) – Z
+        # Go through first transformation(s) - Z
         for i in range(self._z_transformations):
             # Multiply the matrices
             after_z = math_ops.matmul(z_start, self._Z_kernel[i]) + self._Z_bias[i]
