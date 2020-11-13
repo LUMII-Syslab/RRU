@@ -43,17 +43,42 @@ a) Download the installer
 wget https://repo.anaconda.com/archive/Anaconda3-2020.07-Linux-x86_64.sh
 ```
 
+or
+
+```
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+```
+
 b) Run the installer
 ```
 bash Anaconda3-2020.07-Linux-x86_64.sh
 ```
 
-c) Set path:
+or
+
 ```
-export PATH=~/anaconda3/bin:$PATH
+bash Miniconda3-latest-Linux-x86_64.sh
 ```
 
-d) Refresh the shell, so you can use conda command
+c) Set path (corresponding to the location you put it in):
+```
+export PATH=/host-dir/ronalds/anaconda3/bin:$PATH
+```
+
+or  
+
+```
+export PATH=/host-dir/ronalds/miniconda3/bin:$PATH
+```
+
+d) Test if the conda command works for you, for example, with:
+
+```
+conda env list
+```
+
+If it shows that it doesn't understand the command conda, refresh the shell, so you can use conda command
+
 ```
 source .bashrc
 ```
@@ -70,14 +95,14 @@ b) Activate the environment
 conda activate RRU
 ```
 
-3 – Install the remaining requirements
+3 – Install the remaining requirements (dm-sonnet is needed for MogrifierLTSM; we don't use tensorflow_datasets anymore,
+ but it's being imported in imdb_utils.py, in a function, that we don't use anymore)
+
 ```
-conda install cudatoolkit
-conda install cudnn
 conda install tensorflow-gpu=1.15
-/root/anaconda3/envs/RRU/bin/pip3 install sklearn
-/root/anaconda3/envs/RRU/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
-/root/anaconda3/envs/RRU/bin/pip3 install tensorflow_datasets==3
+/host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install sklearn
+/host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
+/host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install tensorflow_datasets==3
 ```
 
 ### 3. Run the experiments (change the inner configuration if you wish)

@@ -77,7 +77,7 @@ else:
 # Data parameters
 data_set_name = "pennchar"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
-window_size = 512  # Enwik8 - 512. Text8 512?, PTB word-level 70?, PTB character-level 150?
+window_size = 512
 step_size = window_size // 2
 batch_size = 64  # Enwik8 - 64. PTB character-level 128?
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
@@ -93,6 +93,7 @@ learning_rate = 0.001  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mog
 number_of_layers = 2
 stateful = True  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
 zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
+outer_dropout = 0  # 0 if you do not want outer dropout
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -101,7 +102,7 @@ log_path = 'logdir_lm/'
 log_after_this_many_steps = 0
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 1
+print_after_this_many_steps = 100
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -124,6 +125,9 @@ class LMModel:
 
         # Bool value if we are in training or not
         training = tf.placeholder(tf.bool, name='training')
+
+        # Output drop probability so we can pass different values depending on training/ testing
+        outer_dropout_rate = tf.placeholder(tf.float32, name='outer_dropout_rate')
 
         # Instantiate our embedding matrix
         embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0), name="word_embedding")
@@ -210,6 +214,8 @@ class LMModel:
 
         last = tf.reshape(value, shape=(-1, final_size))
 
+        last = tf.nn.dropout(last, rate=outer_dropout_rate)
+
         # [batch_size, window_size] -> [batch_size x window_size]
         labels = tf.reshape(y, [-1])
 
@@ -263,6 +269,7 @@ class LMModel:
         self.x = x
         self.y = y
         self.training = training
+        self.outer_dropout_rate = outer_dropout_rate
         if stateful:
             self.initial_state = initial_state
         # Information you can get from this graph
@@ -374,13 +381,15 @@ class LMModel:
                             self.x: x_batch,
                             self.y: y_batch,
                             self.training: True,
+                            self.outer_dropout_rate: outer_dropout,
                             self.initial_state: state
                         }
                     else:
                         feed_dict = {
                             self.x: x_batch,
                             self.y: y_batch,
-                            self.training: True
+                            self.training: True,
+                            self.outer_dropout_rate: outer_dropout
                         }
 
                     if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
@@ -483,13 +492,15 @@ class LMModel:
                                 self.x: x_batch,
                                 self.y: y_batch,
                                 self.training: False,
+                                self.outer_dropout_rate: 0.,
                                 self.initial_state: state
                             }
                         else:
                             feed_dict = {
                                 self.x: x_batch,
                                 self.y: y_batch,
-                                self.training: False
+                                self.training: False,
+                                self.outer_dropout_rate: 0.
                             }
 
                         last_state, l, p, b, a = sess.run([self.state,
@@ -621,13 +632,15 @@ class LMModel:
                         self.x: x_batch,
                         self.y: y_batch,
                         self.training: False,
+                        self.outer_dropout_rate: 0.,
                         self.initial_state: state
                     }
                 else:
                     feed_dict = {
                         self.x: x_batch,
                         self.y: y_batch,
-                        self.training: False
+                        self.training: False,
+                        self.outer_dropout_rate: 0.
                     }
 
                 last_state, l, p, b, a = sess.run([self.state, self.loss, self.perplexity, self.bpc, self.accuracy],

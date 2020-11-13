@@ -1,5 +1,4 @@
 import tensorflow as tf
-import numpy as np
 import time
 from datetime import datetime  # We'll use this to dynamically generate training event names
 
@@ -24,7 +23,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "RRU3"  # Here you can type in the name of the cell you want to use
+cell_name = "LSTM"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -72,11 +71,11 @@ else:
 
 # Hyperparameters
 vocabulary_size = 10000  # 24902 is the max (used to be 88583 for tfds)
-max_sequence_length = 100  # [70-2697] words in tf.keras (used to be [6-2493] words in tdfs). None means max
+max_sequence_length = 500  # [70-2697] words in tf.keras (used to be [6-2493] words in tdfs). None means max
 batch_size = 64
 num_epochs = 10
 HIDDEN_UNITS = 128
-number_of_parameters = 500000  # 500 K? That's what about 128 units gave us
+number_of_parameters = 2000000  # 2 million
 number_of_layers = 2
 embedding_size = 32
 num_classes = 2
