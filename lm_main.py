@@ -197,31 +197,38 @@ class LMModel:
         # Apply the passed dropout
         last = tf.nn.dropout(last, rate=outer_dropout_rate)
 
-        # Reshape the labels – [batch_size, window_size] -> [batch_size x window_size]
-        labels = tf.reshape(y, [-1])
-
         # Calculate the predictions. Final form – [batch_size x window_size, vocabulary_size]
         prediction = tf.matmul(last, weight) + bias
+        # Reshape the predictions for easier further calculations
+        # [batch_size x window_size, vocabulary_size] -> [batch_size, window_size, vocabulary_size]
+        prediction = tf.reshape(prediction, shape=(-1, window_size, vocabulary_size))
 
-        ''' Last half accuracy predictions '''
+        # Predictions for the second half
         half = window_size // 2
-        half_last = tf.reshape(value[:, half:, :], shape=(-1, final_size))
-        half_prediction = tf.matmul(half_last, weight) + bias
-        half_y = y[:, half:]
-        half_correct_prediction = tf.equal(tf.argmax(half_prediction, axis=1), tf.reshape(half_y, [-1]))
-        half_accuracy = tf.reduce_mean(tf.cast(half_correct_prediction, tf.float32))
-        ''' Full size accuracy predictions '''
-        correct_prediction = tf.equal(tf.argmax(prediction, axis=1), labels)
+        half_prediction = prediction[:, half:, :]  # [batch_size, ceil(window_size / 2), vocabulary_size]
 
+        # Accuracy for the second half
+        half_y = y[:, half:]  # [batch_size, ceil(window_size / 2)]
+        half_correct_prediction = tf.equal(tf.argmax(half_prediction, axis=-1), half_y)
+        half_accuracy = tf.reduce_mean(tf.cast(half_correct_prediction, tf.float32))
+        # Accuracy for the full length
+        correct_prediction = tf.equal(tf.argmax(prediction, axis=-1), y)
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
-        # Calculate the loss given prediction and labels
-        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=labels))
+        # Calculate losses given prediction and labels
+        # Loss for results (second half)
+        half_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=half_prediction,
+                                                                                  labels=half_y))
+        # Loss for optimizing (full_length)
+        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction,
+                                                                             labels=y))
 
         # Transform the loss in a format that our tasks require
         if character_level:  # Perplexity in BPC
+            half_perplexity = tf.reduce_mean(half_loss)/np.log(2)
             perplexity = tf.reduce_mean(loss)/np.log(2)
         else:  # Casual perplexity
+            half_perplexity = tf.exp(half_loss)
             perplexity = tf.exp(loss)
 
         # Printing trainable variables which have "kernel" in their name
@@ -255,12 +262,12 @@ class LMModel:
             self.initial_state = initial_state
         # Information you can get from this graph
         self.state = state
-        self.loss = loss
+        self.half_perplexity = half_perplexity
         self.perplexity = perplexity
-        self.optimizer = optimizer
+        self.half_accuracy = half_accuracy
         self.accuracy = accuracy
-        self.prediction = prediction
-        self.correct_prediction = correct_prediction
+        # To call the optimization step (gradient descent)
+        self.optimizer = optimizer
 
         print_trainable_variables()
 
