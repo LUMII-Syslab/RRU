@@ -12,7 +12,10 @@ def get_total_variables():
     return variables_total
 
 
-def find_optimal_hidden_units(hidden_units, number_of_parameters, model_function):
+def find_optimal_hidden_units(hidden_units,
+                              number_of_parameters,
+                              model_function,
+                              ensure_divisibility_with_some_powers_of_two=True):
     # Inspired from https://github.com/deepmind/lamb/blob/master/lamb/lamb_flags.py
     # They made a version that takes in a config file, which might be more useful to some people
     print(f"Searching for the largest possible hidden unit count"
@@ -74,7 +77,24 @@ def find_optimal_hidden_units(hidden_units, number_of_parameters, model_function
                 upper = middle
         return lower
 
-    return find_answer(previous_hidden_size, hidden_size)
+    best_hidden_size = find_answer(previous_hidden_size, hidden_size)
+    print(f"Maximum hidden_size we can use is {best_hidden_size}!")
+
+    # As we are using nvdidia graphics cards, we can make training faster if the parameters
+    # divide with some powers of 2
+    # https://docs.nvidia.com/deeplearning/performance/dl-performance-getting-started/index.html#choose-params
+    if ensure_divisibility_with_some_powers_of_two:
+        if 2 < best_hidden_size < 128 and best_hidden_size % 2 != 0:
+            chosen_hidden_size = best_hidden_size - 1
+        elif 128 < best_hidden_size and best_hidden_size % 8 != 0:
+            chosen_hidden_size = best_hidden_size - (best_hidden_size % 8)
+        else:
+            chosen_hidden_size = best_hidden_size
+    else:
+        chosen_hidden_size = best_hidden_size
+
+    print(f"The hidden size we chose is {chosen_hidden_size}!")
+    return chosen_hidden_size
 
 
 def gelu(x):

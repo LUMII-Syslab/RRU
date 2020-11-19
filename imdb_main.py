@@ -15,6 +15,10 @@ from imdb_utils import get_sequence_lengths
 from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
 
+# Importing fancier optimizer(s)
+# from RAdam import RAdamOptimizer
+from adam_decay import AdamOptimizer_decay
+
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -104,23 +108,26 @@ class IMDBModel:
 
         print("\nBuilding Graph...\n")
 
-        tf.reset_default_graph()  # Build the graph
+        # Build the graph
+        tf.reset_default_graph()
 
         # Batch size list of integer sequences
         x = tf.placeholder(tf.int32, shape=[None, max_sequence_length], name="x")
+
         # One hot labels for sentiment classification
         y = tf.placeholder(tf.int32, shape=[None, num_classes], name="y")
-        # Bool value if we are in training or not
+
+        # Bool value that tells us, whether or not are we in training
         training = tf.placeholder(tf.bool, name='training')
-        # Batch size list of sequence lengths, so we can get variable sequence length rnn
+
+        # Batch size list of sequence lengths, so we can get variable length sequence RNN
         sequence_length = tf.placeholder(tf.int32, [None], name="sequence_length")
 
         # Cast our label to float32. Later it will be better when it does some math (?)
         y = tf.cast(y, tf.float32)
 
         # Instantiate our embedding matrix
-        embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0),
-                                name="word_embedding")
+        embedding = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0), name="word_embedding")
 
         # Lookup embeddings
         embed_lookup = tf.nn.embedding_lookup(embedding, x)
@@ -141,9 +148,6 @@ class IMDBModel:
         # Create the initial state of zeros
         initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
 
-        # Wrap our cell in a dropout wrapper
-        # cell = tf.contrib.rnn.DropoutWrapper(cell=cell, output_keep_prob=0.85)
-
         # Value will have all the outputs, we will need just the last. _ contains hidden states between the steps
         if state_is_tuple:  # # BasicLSTMCell and Mogrifier LSTM needs this
             value, (_, state) = tf.nn.dynamic_rnn(cell,
@@ -160,37 +164,46 @@ class IMDBModel:
 
         # Instantiate weights
         weight = tf.get_variable("weight", [hidden_units, num_classes])
+
         # Instantiate biases
         bias = tf.Variable(tf.constant(0.0, shape=[num_classes]))
 
-        '''Non-variable sequence length dynamic.rnn'''
-        # Hasn't been updated for layered cells (because I think we won't need this anymore)
-        # value = tf.transpose(value, [1, 0, 2])  # After this it's max_time, batch_size, final_size
-        # last = value[-1]  # Extract last output. Should be batch_size final_size
-        '''Variable sequence length'''
-        last = state[-1]  # Used to be just last = state, but we have layered cells now, so we take the last one
+        # We take the last cell's state (for single cell networks, we could do just last = state)
+        last = state[-1]
 
-        prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
+        # We calculate our predictions for each sample (we'll use this to calculate loss over the batch as well)
+        prediction = tf.matmul(last, weight) + bias
 
-        # predictions -        [1,1,0,0]
-        # labels -             [1,0,0,1]
-        # correct_prediction - [1,0,1,0]. We want accuracy over the batch, so we create a mean over it
+        # We calculate on which samples were we correct
+        # predictions        [1,1,0,0]
+        # labels             [1,0,0,1]
+        # correct_prediction [1,0,1,0]
         correct_prediction = tf.equal(tf.argmax(prediction, axis=1), tf.argmax(y, axis=1))
-        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-        tf.summary.scalar("accuracy", accuracy)
 
-        # Choices our model made
-        # choice = tf.argmax(prediction, axis=1)
+        # We want accuracy over the batch, so we create a mean over it
+        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
         # Calculate the loss given prediction and labels
         # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=prediction, labels=y))
         loss = tf.losses.softmax_cross_entropy(onehot_labels=y, logits=prediction, label_smoothing=0.1)
-        tf.summary.scalar("loss", loss)
+
+        # Printing trainable variables which have "kernel" in their name
+        decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
+        for c in decay_vars:
+            print(c)
 
         # Declare our optimizer, we have to check which one works better.
         # Before: Adam gave better training accuracy and loss, but RMSProp gave better validation accuracy and loss
-        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+        # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+        optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
+                                        L2_decay=0.01,
+                                        decay_vars=decay_vars).minimize(loss)
+        # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
+
+        # What to log to TensorBoard if a number was specified for "log_after_this_many_steps" variable
+        tf.summary.scalar("accuracy", accuracy)
+        tf.summary.scalar("loss", loss)
 
         # Expose symbols to class
         # Placeholders
@@ -215,12 +228,12 @@ class IMDBModel:
 
             # Adding a writer so we can visualize accuracy and loss on TensorBoard
             merged_summary = tf.summary.merge_all()
-            train_writer = tf.summary.FileWriter(output_path)
-            train_writer.add_graph(sess.graph)
+            training_writer = tf.summary.FileWriter(output_path + "/training")
+            training_writer.add_graph(sess.graph)
 
             for epoch in range(num_epochs):
                 print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
-                if epoch > 0:
+                if epoch > 0:  # If it's not the first epoch, we shuffle the data
                     data = list(zip(x_train, y_train))
                     if shuffle_data:
                         shuffle(data)
@@ -253,29 +266,36 @@ class IMDBModel:
                         s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
                                               feed_dict=feed_dict)
 
-                        train_writer.add_summary(s, i + epoch * num_batches)
+                        training_writer.add_summary(s, i + epoch * num_batches)
                     else:
                         _, l, a = sess.run([self.optimizer, self.loss, self.accuracy],
                                            feed_dict=feed_dict)
 
                     total_loss += l
-                    if i == 0:
-                        total_accuracy = a
-                    else:
-                        total_accuracy = (total_accuracy * i + a) / (i + 1)
+                    total_accuracy += a
 
-                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0) or i == num_batches - 1:
-                        print(f"Step {i + 1} of {num_batches} | Loss: {l}, Accuracy: {a}, TimeFromStart: {time.time() - start_time}")
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                            or i == num_batches - 1:
+                        print(f"Step {i + 1} of {num_batches} | "
+                              f"Loss: {l}, "
+                              f"Accuracy: {a}, "
+                              f"Time from start: {time.time() - start_time}")
 
-                print(f"   Epoch {epoch + 1} | Loss: {total_loss}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
-
-                epoch_accuracy_summary = tf.Summary()
-                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=total_accuracy)
-                train_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+                average_loss = total_loss / num_batches
+                average_accuracy = total_accuracy / num_batches
+                print(f"   Epoch {epoch + 1} | "
+                      f"Average loss: {average_loss}, "
+                      f"Average accuracy: {average_accuracy}, "
+                      f"Time spent: {time.time() - start_time}")
 
                 epoch_loss_summary = tf.Summary()
-                epoch_loss_summary.value.add(tag='epoch_loss', simple_value=total_loss)
-                train_writer.add_summary(epoch_loss_summary, epoch + 1)
+                epoch_loss_summary.value.add(tag='epoch_loss', simple_value=average_loss)
+                training_writer.add_summary(epoch_loss_summary, epoch + 1)
+
+                epoch_accuracy_summary = tf.Summary()
+                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_accuracy)
+                training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+                training_writer.flush()
             # Training ends here
             # Save checkpoint
             saver = tf.compat.v1.train.Saver()
@@ -288,8 +308,8 @@ class IMDBModel:
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
             # Adding a writer so we can visualize accuracy and loss on TensorBoard
-            test_writer = tf.summary.FileWriter(output_path + "/testing")
-            test_writer.add_graph(sess.graph)
+            testing_writer = tf.summary.FileWriter(output_path + "/testing")
+            testing_writer.add_graph(sess.graph)
 
             # Restore session
             ckpt = tf.train.get_checkpoint_state(ckpt_path)
@@ -320,25 +340,33 @@ class IMDBModel:
                                                                        self.sequence_length: sequence_lengths})
 
                 total_loss += l
-                if i == 0:
-                    total_accuracy = a
-                else:
-                    total_accuracy = (total_accuracy * i + a) / (i + 1)
+                total_accuracy += a
 
-                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0) or i == num_batches - 1:
-                    print(f"Step {i + 1} of {num_batches} | Loss: {total_loss}, Accuracy: {total_accuracy}, TimeFromStart: {time.time() - start_time}")
+                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                        or i == num_batches - 1:
+                    print(f"Step {i + 1} of {num_batches} | "
+                          f"Average loss: {total_loss / (i + 1)}, "
+                          f"Average accuracy: {total_accuracy / (i + 1)}, "
+                          f"Time from start: {time.time() - start_time}")
 
-            print(f"Final testing stats | Loss: {total_loss}, Accuracy: {total_accuracy}, TimeSpent: {time.time() - start_time}")
+            average_loss = total_loss / num_batches
+            average_accuracy = total_accuracy / num_batches
+            print(f"Final testing stats | "
+                  f"Average loss: {average_loss}, "
+                  f"Average accuracy: {average_accuracy}, "
+                  f"Time spent: {time.time() - start_time}")
 
             # We add this to TensorBoard so we don't have to dig in console logs and nohups
-            testing_accuracy_summary = tf.Summary()
-            testing_accuracy_summary.value.add(tag='testing_accuracy', simple_value=total_accuracy)
-            test_writer.add_summary(testing_accuracy_summary, 1)
-
             testing_loss_summary = tf.Summary()
-            testing_loss_summary.value.add(tag='testing_loss', simple_value=total_loss)
-            test_writer.add_summary(testing_loss_summary, 1)
-            test_writer.flush()
+            testing_loss_summary.value.add(tag='testing_loss', simple_value=average_loss)
+            testing_writer.add_summary(testing_loss_summary, 1)
+
+            testing_accuracy_summary = tf.Summary()
+            testing_accuracy_summary.value.add(tag='testing_accuracy', simple_value=average_accuracy)
+            testing_writer.add_summary(testing_accuracy_summary, 1)
+            testing_writer.flush()
+
+            return average_accuracy
 
 
 def parse_args():  # Parse arguments. Currently not used, we will need to write it differently later.
