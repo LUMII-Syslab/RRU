@@ -81,7 +81,6 @@ if data_set_name in ["penn"]:
     character_level = False
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
 window_size = 512
-step_size = window_size // 2
 batch_size = 64  # Enwik8 - 64. PTB character-level 128?
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 continuous_batches = True  # Batches go continuously, this might give performance boost with a stateful RNN cell
@@ -300,7 +299,7 @@ class LMModel:
             if stateful or continuous_batches:
                 training_indexes = get_window_indexes(len(training_data), window_size, window_size)
             else:
-                training_indexes = get_window_indexes(len(training_data), window_size, step_size)
+                training_indexes = get_window_indexes(len(training_data), window_size, window_size // 2)
 
             num_training_batches = len(training_indexes) // batch_size
 
@@ -366,21 +365,33 @@ class LMModel:
                             self.outer_dropout_rate: outer_dropout
                         }
 
+                    # Do we need to fetch the full length stats
+                    need_full = stateful or continuous_batches or i == 0
+
                     if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
                         s, _, last_state, p, a = sess.run([merged_summary,
                                                            self.optimizer,
                                                            self.state,
-                                                           self.perplexity,
-                                                           self.accuracy],
+                                                           self.perplexity if need_full else self.half_perplexity,
+                                                           self.accuracy if need_full else self.half_accuracy],
                                                           feed_dict=feed_dict)
 
                         training_writer.add_summary(s, i + epoch * num_training_batches)
                     else:
                         _, last_state, p, a = sess.run([self.optimizer,
                                                         self.state,
-                                                        self.perplexity,
-                                                        self.accuracy],
+                                                        self.perplexity if need_full else self.half_perplexity,
+                                                        self.accuracy if need_full else self.half_accuracy],
                                                        feed_dict=feed_dict)
+
+                    # To have 100% data covered if we had step_size = window_size // 2 , we need to have full length
+                    # values for first batch
+                    extra_tasks_for_perfection = not stateful and not continuous_batches and i == 0
+                    if extra_tasks_for_perfection:
+                        # Because we went through 2 halves, to have fair average we need extra addition, but we will
+                        # have to divide by one more later
+                        total_training_perplexity += p
+                        total_training_accuracy += a
 
                     state = last_state
 
@@ -394,13 +405,13 @@ class LMModel:
                               f"Accuracy: {a}, "
                               f"Time from start: {time.time() - start_time}")
 
-                average_training_perplexity = total_training_perplexity / num_training_batches
-                average_training_accuracy = total_training_accuracy / num_training_batches
+                statistics_count = (num_training_batches + 1) if extra_tasks_for_perfection else num_training_batches
+                average_training_perplexity = total_training_perplexity / statistics_count
+                average_training_accuracy = total_training_accuracy / statistics_count
                 print(f"   Epoch {epoch + 1} | "
                       f"Average perplexity: {average_training_perplexity}, "
                       f"Average accuracy: {average_training_accuracy}, "
                       f"Time spent: {time.time() - start_time}")
-
 
                 epoch_perplexity_summary = tf.Summary()
                 epoch_perplexity_summary.value.add(tag='epoch_perplexity', simple_value=average_training_perplexity)
@@ -414,10 +425,7 @@ class LMModel:
                 if validation_data is not None:
                     print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
 
-                    if stateful or continuous_batches:
-                        validation_indexes = get_window_indexes(len(validation_data), window_size, window_size)
-                    else:
-                        validation_indexes = get_window_indexes(len(validation_data), window_size, step_size)
+                    validation_indexes = get_window_indexes(len(validation_data), window_size, window_size // 2)
 
                     num_validation_batches = len(validation_indexes) // batch_size
 
@@ -443,7 +451,7 @@ class LMModel:
                                 # Run the remaining sequences (that might be larger than batch size)
                                 x_batch = validation_indexes[i * batch_size:]
 
-                        if stateful and (np.random.uniform() < zero_state_chance or i == 0):
+                        if stateful:
                             # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
                             zero_state = np.zeros((len(x_batch), self.hidden_units))
                             if state_is_tuple:
@@ -471,12 +479,13 @@ class LMModel:
                                 self.outer_dropout_rate: 0.
                             }
 
-                        last_state, p, a = sess.run([self.state,
-                                                     self.perplexity,
-                                                     self.accuracy],
-                                                    feed_dict=feed_dict)
-
-                        state = last_state
+                        if i == 0:  # To have 100% data covered we need to have full length values for first batch
+                            p, a = sess.run([self.perplexity, self.accuracy], feed_dict=feed_dict)
+                            # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
+                            p = 2 * p
+                            a = 2 * a
+                        else:
+                            p, a = sess.run([self.half_perplexity, self.half_accuracy], feed_dict=feed_dict)
 
                         total_validation_perplexity += p
                         total_validation_accuracy += a
@@ -484,12 +493,13 @@ class LMModel:
                         if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                                 or i == num_validation_batches - 1:
                             print(f"Step {i + 1} of {num_validation_batches} | "
-                                  f"Average perplexity: {total_validation_perplexity / (i + 1)}, "
-                                  f"Average accuracy: {total_validation_accuracy / (i + 1)}, "
+                                  f"Average perplexity: {total_validation_perplexity / (i + 2)}, "
+                                  f"Average accuracy: {total_validation_accuracy / (i + 2)}, "
                                   f"Time from start: {time.time() - start_time}")
 
-                    average_validation_perplexity = total_validation_perplexity / num_validation_batches
-                    average_validation_accuracy = total_validation_accuracy / num_validation_batches
+                    # + 1 because we counted the 1st batch twice
+                    average_validation_perplexity = total_validation_perplexity / (num_validation_batches + 1)
+                    average_validation_accuracy = total_validation_accuracy / (num_validation_batches + 1)
                     print(f"Final validation stats | "
                           f"Average perplexity: {average_validation_perplexity}, "
                           f"Average accuracy: {average_validation_accuracy}, "
@@ -541,10 +551,7 @@ class LMModel:
             testing_writer = tf.summary.FileWriter(output_path + "/testing")
             testing_writer.add_graph(sess.graph)
 
-            if stateful or continuous_batches:
-                indexes = get_window_indexes(len(data), window_size, window_size)
-            else:
-                indexes = get_window_indexes(len(data), window_size, step_size)
+            indexes = get_window_indexes(len(data), window_size, window_size // 2)
 
             # Restore session
             ckpt = tf.train.get_checkpoint_state(ckpt_path)
@@ -559,8 +566,6 @@ class LMModel:
             total_accuracy = 0
 
             start_time = time.time()
-
-            state = None
 
             for i in range(num_batches):
                 if continuous_batches:
@@ -578,7 +583,7 @@ class LMModel:
                         # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
                         x_batch = indexes[i * batch_size:]
 
-                if stateful and (np.random.uniform() < zero_state_chance or i == 0):
+                if stateful:
                     # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
                     zero_state = np.zeros((len(x_batch), self.hidden_units))
                     if state_is_tuple:
@@ -606,9 +611,13 @@ class LMModel:
                         self.outer_dropout_rate: 0.
                     }
 
-                last_state, p, a = sess.run([self.state, self.perplexity, self.accuracy], feed_dict=feed_dict)
-
-                state = last_state
+                if i == 0:  # To have 100% data covered we need to have full length values for first batch
+                    p, a = sess.run([self.perplexity, self.accuracy], feed_dict=feed_dict)
+                    # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
+                    p = 2 * p
+                    a = 2 * a
+                else:
+                    p, a = sess.run([self.half_perplexity, self.half_accuracy], feed_dict=feed_dict)
 
                 total_perplexity += p
                 total_accuracy += a
@@ -616,11 +625,11 @@ class LMModel:
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                         or i == num_batches - 1:
                     print(f"Step {i + 1} of {num_batches} | "
-                          f"Average perplexity: {total_perplexity / (i + 1)}, "
-                          f"Average accuracy: {total_accuracy / (i + 1)}, "
+                          f"Average perplexity: {total_perplexity / (i + 2)}, "
+                          f"Average accuracy: {total_accuracy / (i + 2)}, "
                           f"Time from start: {time.time() - start_time}")
-            average_perplexity = total_perplexity / num_batches
-            average_accuracy = total_accuracy / num_batches
+            average_perplexity = total_perplexity / (num_batches + 1)
+            average_accuracy = total_accuracy / (num_batches + 1)
             print(f"Final testing stats | "
                   f"Average perplexity: {average_perplexity}, "
                   f"Average accuracy: {average_accuracy}, "
