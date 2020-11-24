@@ -78,7 +78,7 @@ else:
 # Hyperparameters
 vocabulary_size = 10000  # 24902 is the max (used to be 88583 for tfds)
 max_sequence_length = 500  # [70-2697] words in tf.keras (used to be [6-2493] words in tdfs). None means max
-batch_size = 64
+batch_size = 64  # Max batch_size = 25000
 num_epochs = 10
 HIDDEN_UNITS = 128
 number_of_parameters = 2000000  # 2 million

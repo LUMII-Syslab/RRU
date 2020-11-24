@@ -77,7 +77,7 @@ data_set_name = "JSB Chorales"
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
 window_size = 200  # If you have a lot of resources you can run this on full context size - 160/3780/1793/3623
 step_size = window_size // 2
-batch_size = 16
+batch_size = 16  # Max batch_sizes: JSB Chorales 76; MuseData 124; Nottingham 170; Piano-midi.de 12
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 shuffle_data = True  # Should we shuffle the samples?
 # Training

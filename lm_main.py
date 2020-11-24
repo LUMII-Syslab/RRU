@@ -84,7 +84,7 @@ if data_set_name in ["penn"]:
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
 window_size = 512  # This must be 1 or an even number (otherwise loss calculation won't be correct (we do half_loss))
 assert window_size == 1 or window_size % 2 == 0, "Variable window_size must be 1 or an even number!"
-batch_size = 64
+batch_size = 64  # Max batch_sizes: ptb word 137; ptb char 761; enwik8 & text8 = 9765
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 continuous_batches = True  # Batches go continuously, this might give performance boost with a stateful RNN cell
 shuffle_data = False  # Should we shuffle the samples?
