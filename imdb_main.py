@@ -14,6 +14,8 @@ from imdb_utils import get_sequence_lengths
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
+# Importing the necessary stuff for hyperparameter optimization
+from hyperopt import hp, tpe, Trials, fmin
 
 # Importing fancier optimizer(s)
 # from RAdam import RAdamOptimizer
@@ -27,7 +29,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "LSTM"  # Here you can type in the name of the cell you want to use
+cell_name = "RRU3"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -86,6 +88,7 @@ num_classes = 2
 learning_rate = 0.001
 shuffle_data = True
 fixed_batch_size = False
+do_hyperparameter_optimization = False
 
 ckpt_path = 'ckpt_imdb/'
 log_path = 'logdir_imdb/'
@@ -148,28 +151,25 @@ class IMDBModel:
         # Create the initial state of zeros
         initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
 
-        # Value will have all the outputs, we will need just the last. _ contains hidden states between the steps
-        if state_is_tuple:  # # BasicLSTMCell and Mogrifier LSTM needs this
-            value, (_, state) = tf.nn.dynamic_rnn(cell,
-                                                  embed_lookup,
-                                                  initial_state=initial_state,
-                                                  dtype=tf.float32,
-                                                  sequence_length=sequence_length)
+        value, state = tf.nn.dynamic_rnn(cell,
+                                         embed_lookup,
+                                         initial_state=initial_state,
+                                         dtype=tf.float32,
+                                         sequence_length=sequence_length)
+
+        if state_is_tuple:  # BasicLSTMCell and Mogrifier LSTM needs this
+            state = state[-1]  # Last cell
+            (_, state) = state  # We need only the second value from the tuple
+            last = state
         else:
-            value, state = tf.nn.dynamic_rnn(cell,
-                                             embed_lookup,
-                                             initial_state=initial_state,
-                                             dtype=tf.float32,
-                                             sequence_length=sequence_length)
+            # We take the last cell's state (for single cell networks, we could do just last = state)
+            last = state[-1]
 
         # Instantiate weights
         weight = tf.get_variable("weight", [hidden_units, num_classes])
 
         # Instantiate biases
         bias = tf.Variable(tf.constant(0.0, shape=[num_classes]))
-
-        # We take the last cell's state (for single cell networks, we could do just last = state)
-        last = state[-1]
 
         # We calculate our predictions for each sample (we'll use this to calculate loss over the batch as well)
         prediction = tf.matmul(last, weight) + bias
@@ -387,12 +387,76 @@ if __name__ == '__main__':  # Main function
     # From which function/class we can get the model
     model_function = IMDBModel
 
-    HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
-                                             number_of_parameters=number_of_parameters,
-                                             model_function=model_function)
+    if not do_hyperparameter_optimization:
+        HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
+                                                 number_of_parameters=number_of_parameters,
+                                                 model_function=model_function)
 
-    model = model_function(HIDDEN_UNITS)  # Create the model
+        MODEL = model_function(HIDDEN_UNITS)  # Create the model
 
-    model.fit(X_TRAIN, Y_TRAIN)
+        MODEL.fit(X_TRAIN, Y_TRAIN)
 
-    model.evaluate(X_TEST, Y_TEST)
+        MODEL.evaluate(X_TEST, Y_TEST)
+    else:
+        times_to_evaluate = 2
+
+        lr_choice = [0.1, 0.05, 0.01, 0.005, 0.001]
+        num_layers_choice = [1, 2, 3]
+        batch_choice = [1, 2, 4, 8, 16, 32, 64]
+        # We need this, so we can print the hp.choice answers normally
+        choices = {
+            'lr': lr_choice,
+            'num_layers': num_layers_choice,
+            'batch': batch_choice
+        }
+
+        space = [
+            hp.choice('lr', lr_choice),
+            hp.choice('num_layers', num_layers_choice),
+            hp.choice('batch', batch_choice)
+        ]
+
+
+        def objective(lr, num_layers, batch):
+            # The parameters to be optimized
+            global learning_rate
+            learning_rate = lr
+            global number_of_layers
+            number_of_layers = num_layers
+            global batch_size
+            batch_size = batch
+
+            # This might give some clues
+            global output_path
+            output_path = f"{log_path}{model_name}/{current_time}/lr{lr}layers{num_layers}batch{batch}"
+
+            global HIDDEN_UNITS
+            global model_function
+
+            HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
+                                                     number_of_parameters=number_of_parameters,
+                                                     model_function=model_function)
+
+            model = model_function(HIDDEN_UNITS)  # Create the model
+
+            model.fit(X_TRAIN, Y_TRAIN)  # Train the model (validating after each epoch)
+
+            # Test the last saved model (it returns testing accuracy, and hyperopt needs something to minimize, so we
+            # pass negative accuracy)
+            return - model.evaluate(X_TEST, Y_TEST)
+
+        # https://github.com/hyperopt/hyperopt/issues/129
+        def objective2(args):
+            return objective(*args)
+
+        # Create the algorithm
+        tpe_algo = tpe.suggest
+        # Create trials object
+        tpe_trials = Trials()
+
+        # Run 2000 evals with the tpe algorithm
+        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
+
+        from utils import print_trials_information
+
+        print_trials_information(tpe_trials, choices, metric="Accuracy", reverse_sign=True)

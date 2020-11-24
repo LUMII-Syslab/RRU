@@ -1,7 +1,5 @@
 import tensorflow as tf
-import numpy as np
 import time
-import math
 from datetime import datetime  # We'll use this to dynamically generate training event names
 
 from sklearn.utils import shuffle  # We'll use this to shuffle training data
@@ -15,7 +13,7 @@ from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
 from RAdam import RAdamOptimizer
 # Importing the necessary stuff for hyperparameter optimization
-from hyperopt import hp, rand, tpe, Trials, fmin
+from hyperopt import hp, tpe, Trials, fmin
 
 # Importing fancier optimizer(s)
 # from RAdam import RAdamOptimizer
@@ -23,7 +21,7 @@ from adam_decay import AdamOptimizer_decay
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
 import os
-#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 #
 # You can check if this line makes it train faster, while still training correctly
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
@@ -163,12 +161,12 @@ class MusicModel:
 
         # Final form should be [batch_size x window_size, vocabulary_size]
         prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
-
-        # [batch_size, window_size, vocabulary_size] -> [batch_size x window_size, vocabulary_size]
-        labels = tf.reshape(y, shape=(-1, vocabulary_size))
+        # Reshape the predictions to match y dimensions
+        # [batch_size x window_size, vocabulary_size] -> [batch_size, window_size, vocabulary_size]
+        prediction = tf.reshape(prediction, shape=(-1, window_size, vocabulary_size))
 
         # Calculate NLL loss
-        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=prediction, labels=labels)
+        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=prediction, labels=y)
         loss = tf.reduce_sum(loss, -1)
         loss = tf.reduce_mean(loss)
 
@@ -180,9 +178,9 @@ class MusicModel:
         # Declare our optimizer, we have to check which one works better.
         # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
         optimizer = RAdamOptimizer(learning_rate=learning_rate,
-                                L2_decay=0.0,
-                                decay_vars=decay_vars,
-                                clip_gradients=True, clip_multiplier=1.5).minimize(loss)
+                                   L2_decay=0.0,
+                                   decay_vars=decay_vars,
+                                   clip_gradients=True, clip_multiplier=1.5).minimize(loss)
         # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
@@ -196,8 +194,8 @@ class MusicModel:
         self.training = training
         # Information you can get from this graph
         self.loss = loss
+        # To call the optimization step (gradient descent)
         self.optimizer = optimizer
-        self.prediction = prediction
 
         print_trainable_variables()
 
@@ -280,7 +278,7 @@ class MusicModel:
                 if valid_data is not None:
                     print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
 
-                    x_valid, y_valid = split_data_in_parts(valid_data, window_size, step_size, vocabulary_size)
+                    x_valid, y_valid = split_data_in_parts(valid_data, window_size, window_size, vocabulary_size)
 
                     num_validation_batches = len(x_valid) // batch_size
 
@@ -361,7 +359,7 @@ class MusicModel:
             testing_writer = tf.summary.FileWriter(output_path + "/testing")
             testing_writer.add_graph(sess.graph)
 
-            x_test, y_test = split_data_in_parts(data, window_size, step_size, vocabulary_size)
+            x_test, y_test = split_data_in_parts(data, window_size, window_size, vocabulary_size)
 
             # Restore session
             ckpt = tf.train.get_checkpoint_state(ckpt_path)
@@ -416,27 +414,41 @@ class MusicModel:
 
 
 if __name__ == '__main__':  # Main function
-    TRAIN_DATA, VALID_DATA, TEST_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
+    TRAINING_DATA, VALIDATION_DATA, TESTING_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
+
+    # From which function/class we can get the model
+    model_function = MusicModel
 
     if not do_hyperparameter_optimization:
-        # From which function/class we can get the model
-        MODEL_FUNCTION = MusicModel
-
         HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
                                                  number_of_parameters=number_of_parameters,
-                                                 model_function=MODEL_FUNCTION)
+                                                 model_function=model_function)
 
-        MODEL = MODEL_FUNCTION(HIDDEN_UNITS)  # Create the model
+        MODEL = model_function(HIDDEN_UNITS)  # Create the model
 
-        MODEL.fit(TRAIN_DATA, VALID_DATA)  # Train the model (validating after each epoch)
+        MODEL.fit(TRAINING_DATA, VALIDATION_DATA)  # Train the model (validating after each epoch)
 
-        MODEL.evaluate(TEST_DATA)  # Test the last saved model
+        MODEL.evaluate(TESTING_DATA)  # Test the last saved model
     else:
+        times_to_evaluate = 2
+
+        lr_choice = [0.1, 0.05, 0.01, 0.005, 0.001]
+        inner_drop_choice = [0., 0.1, 0.2, 0.3, 0.4]
+        num_layers_choice = [1, 2, 3]
+        batch_choice = [1, 2, 4, 8, 16, 32, 64]
+        # We need this, so we can print the hp.choice answers normally
+        choices = {
+            'lr': lr_choice,
+            'inner_drop': inner_drop_choice,
+            'num_layers': num_layers_choice,
+            'batch': batch_choice
+        }
+
         space = [
-            hp.choice('lr', [0.1, 0.05, 0.01, 0.005, 0.001]),
-            hp.choice('inner_drop', [0., 0.1, 0.2, 0.3, 0.4]),
-            hp.choice('num_layers', [1, 2, 3]),
-            hp.choice('batch', [1, 2, 4, 8, 16, 32, 64])
+            hp.choice('lr', lr_choice),
+            hp.choice('inner_drop', inner_drop_choice),
+            hp.choice('num_layers', num_layers_choice),
+            hp.choice('batch', batch_choice)
         ]
 
         def objective(lr, inner_drop, num_layers, batch):
@@ -452,11 +464,10 @@ if __name__ == '__main__':  # Main function
 
             # This might give some clues
             global output_path
-            output_path = log_path + model_name + f'/{data_set_name}/' + current_time + f'/lr{lr}drop{inner_drop}layers{num_layers}batch{batch}'
+            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/lr{lr}drop{inner_drop}layers{num_layers}batch{batch}"
 
             global HIDDEN_UNITS
-            # From which function/class we can get the model
-            model_function = MusicModel
+            global model_function
 
             HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
                                                      number_of_parameters=number_of_parameters,
@@ -464,9 +475,9 @@ if __name__ == '__main__':  # Main function
 
             model = model_function(HIDDEN_UNITS)  # Create the model
 
-            model.fit(TRAIN_DATA, VALID_DATA)  # Train the model (validating after each epoch)
+            model.fit(TRAINING_DATA, VALIDATION_DATA)  # Train the model (validating after each epoch)
 
-            return model.evaluate(TEST_DATA)  # Test the last saved model (it returns testing loss)
+            return model.evaluate(TESTING_DATA)  # Test the last saved model (it returns testing loss)
 
         # https://github.com/hyperopt/hyperopt/issues/129
         def objective2(args):
@@ -478,11 +489,8 @@ if __name__ == '__main__':  # Main function
         tpe_trials = Trials()
 
         # Run 2000 evals with the tpe algorithm
-        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=10)
+        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
 
-        print(tpe_best)
-        print('Minimum loss attained with TPE:    {:.4f}'.format(tpe_trials.best_trial['result']['loss']))
-        print(tpe_trials.trials)
-        print(tpe_trials.results)
-        print(tpe_trials.losses())
-        print(tpe_trials.statuses())
+        from utils import print_trials_information
+
+        print_trials_information(tpe_trials, choices, metric="NLL")

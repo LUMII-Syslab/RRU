@@ -109,3 +109,29 @@ def print_trainable_variables():
         print("Learnable parameters:", variables_total / 1000 / 1000, 'M')  # , flush=True)
     else:
         print("Learnable parameters:", variables_total / 1000, 'K')  # , flush=True)
+
+
+# Self-made function to get a readable hyperopt output
+def print_trials_information(hyperopt_trials, hyperopt_choices, metric="Loss", reverse_sign=False):
+
+    def print_trial_information(single_trial):
+        # keys(['state', 'tid', 'spec', 'result', 'misc', 'exp_key', 'owner', 'version', 'book_time', 'refresh_time'])
+        print(f"Trial {single_trial['tid'] + 1}")
+        for variable in single_trial['misc']['vals']:
+            value = single_trial['misc']['vals'][variable][0]
+
+            if variable in hyperopt_choices.keys():
+                value = hyperopt_choices[variable][value]
+
+            print(f"    {variable} = {value}")
+        if reverse_sign:
+            print(f"    {metric} - {- single_trial['result']['loss']}")
+        else:
+            print(f"    {metric} - {single_trial['result']['loss']}")
+
+    for trial in hyperopt_trials.trials:
+        print_trial_information(trial)
+
+    best_trial = hyperopt_trials.best_trial
+    print(f"\nBest Trial")
+    print_trial_information(best_trial)

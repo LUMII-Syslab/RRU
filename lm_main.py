@@ -14,6 +14,8 @@ from lm_utils import get_input_data_from_indexes
 from utils import find_optimal_hidden_units
 from utils import gelu
 from utils import print_trainable_variables
+# Importing the necessary stuff for hyperparameter optimization
+from hyperopt import hp, tpe, Trials, fmin
 
 # Importing fancier optimizer(s)
 # from RAdam import RAdamOptimizer
@@ -80,8 +82,9 @@ character_level = True
 if data_set_name in ["penn"]:
     character_level = False
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
-window_size = 512
-batch_size = 64  # Enwik8 - 64. PTB character-level 128?
+window_size = 512  # This must be 1 or an even number (otherwise loss calculation won't be correct (we do half_loss))
+assert window_size == 1 or window_size % 2 == 0, "Variable window_size must be 1 or an even number!"
+batch_size = 64
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 continuous_batches = True  # Batches go continuously, this might give performance boost with a stateful RNN cell
 shuffle_data = False  # Should we shuffle the samples?
@@ -97,6 +100,7 @@ number_of_layers = 2
 stateful = True  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
 zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
 outer_dropout = 0  # 0, if you do not want outer dropout
+do_hyperparameter_optimization = False
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -661,12 +665,74 @@ if __name__ == '__main__':  # Main function
     # From which function/class we can get the model
     model_function = LMModel
 
-    HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
-                                             number_of_parameters=number_of_parameters,
-                                             model_function=model_function)
+    if not do_hyperparameter_optimization:
+        HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
+                                                 number_of_parameters=number_of_parameters,
+                                                 model_function=model_function)
 
-    model = model_function(HIDDEN_UNITS)  # Create the model
+        MODEL = model_function(HIDDEN_UNITS)  # Create the model
 
-    model.fit(TRAINING_DATA, VALIDATION_DATA)  # Train the model (validating after each epoch)
+        MODEL.fit(TRAINING_DATA, VALIDATION_DATA)  # Train the model (validating after each epoch)
 
-    model.evaluate(TESTING_DATA)  # Test the last saved model
+        MODEL.evaluate(TESTING_DATA)  # Test the last saved model
+    else:
+        times_to_evaluate = 2
+
+        lr_choice = [0.1, 0.05, 0.01, 0.005, 0.001]
+        num_layers_choice = [1, 2, 3]
+        batch_choice = [1, 2, 4, 8, 16, 32, 64]
+        # We need this, so we can print the hp.choice answers normally
+        choices = {
+            'lr': lr_choice,
+            'num_layers': num_layers_choice,
+            'batch': batch_choice
+        }
+
+        space = [
+            hp.choice('lr', lr_choice),
+            hp.choice('num_layers', num_layers_choice),
+            hp.choice('batch', batch_choice)
+        ]
+
+
+        def objective(lr, num_layers, batch):
+            # The parameters to be optimized
+            global learning_rate
+            learning_rate = lr
+            global number_of_layers
+            number_of_layers = num_layers
+            global batch_size
+            batch_size = batch
+
+            # This might give some clues
+            global output_path
+            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/lr{lr}layers{num_layers}batch{batch}"
+
+            global HIDDEN_UNITS
+            global model_function
+
+            HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
+                                                     number_of_parameters=number_of_parameters,
+                                                     model_function=model_function)
+
+            model = model_function(HIDDEN_UNITS)  # Create the model
+
+            model.fit(TRAINING_DATA, VALIDATION_DATA)  # Train the model (validating after each epoch)
+
+            return model.evaluate(TESTING_DATA)  # Test the last saved model (it returns testing perplexity)
+
+        # https://github.com/hyperopt/hyperopt/issues/129
+        def objective2(args):
+            return objective(*args)
+
+        # Create the algorithm
+        tpe_algo = tpe.suggest
+        # Create trials object
+        tpe_trials = Trials()
+
+        # Run 2000 evals with the tpe algorithm
+        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
+
+        from utils import print_trials_information
+
+        print_trials_information(tpe_trials, choices, metric="Perplexity")
