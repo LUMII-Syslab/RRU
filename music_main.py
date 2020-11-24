@@ -13,7 +13,7 @@ from music_utils import split_data_in_parts
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
-
+from RAdam import RAdamOptimizer
 # Importing the necessary stuff for hyperparameter optimization
 from hyperopt import hp, rand, tpe, Trials, fmin
 
@@ -23,7 +23,7 @@ from adam_decay import AdamOptimizer_decay
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 #
 # You can check if this line makes it train faster, while still training correctly
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
@@ -179,9 +179,10 @@ class MusicModel:
 
         # Declare our optimizer, we have to check which one works better.
         # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
-        optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
-                                        L2_decay=0.01,
-                                        decay_vars=decay_vars).minimize(loss)
+        optimizer = RAdamOptimizer(learning_rate=learning_rate,
+                                L2_decay=0.0,
+                                decay_vars=decay_vars,
+                                clip_gradients=True, clip_multiplier=1.5).minimize(loss)
         # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
