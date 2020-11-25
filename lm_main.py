@@ -100,7 +100,10 @@ number_of_layers = 2
 stateful = True  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
 zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
 outer_dropout = 0  # 0, if you do not want outer dropout
-do_hyperparameter_optimization = False
+L2_decay = 0.01
+do_hyperparameter_optimization = True
+RRU_inner_dropout = 0.2
+z_transformations = 2
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -146,7 +149,7 @@ class LMModel:
         cells = []
         for _ in range(number_of_layers):
             if has_training_bool:
-                cell = cell_fn(hidden_units, training=training)
+                cell = cell_fn(hidden_units, training=training, dropout_rate=RRU_inner_dropout, z_transformations=z_transformations)
             else:
                 cell = cell_fn(hidden_units)
             cells.append(cell)
@@ -242,7 +245,7 @@ class LMModel:
         # Declare our optimizer, we have to check which one works better.
         # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
         optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
-                                        L2_decay=0.01,
+                                        L2_decay=L2_decay,
                                         decay_vars=decay_vars).minimize(loss)
         # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
@@ -676,37 +679,51 @@ if __name__ == '__main__':  # Main function
 
         MODEL.evaluate(TESTING_DATA)  # Test the last saved model
     else:
-        times_to_evaluate = 2
+        times_to_evaluate = 50
 
-        lr_choice = [0.1, 0.05, 0.01, 0.005, 0.001]
+        batch_choice = [16, 32, 64]  # @210th server we can't fit more than 64 (128 throws inUse)
+        num_params_choice = [12000000, 18000000, 24000000, 30000000, 36000000]
         num_layers_choice = [1, 2, 3]
-        batch_choice = [1, 2, 4, 8, 16, 32, 64]
+        z_trans_choice = [1, 2, 3]
+        drop_rate_choice = [0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
         # We need this, so we can print the hp.choice answers normally
         choices = {
-            'lr': lr_choice,
+            'batch': batch_choice,
+            'num_params': num_params_choice,
             'num_layers': num_layers_choice,
-            'batch': batch_choice
+            'z_trans': z_trans_choice,
+            'drop_rate': drop_rate_choice
         }
+        loguniforms = ['lr']
 
         space = [
-            hp.choice('lr', lr_choice),
+            hp.choice('batch', batch_choice),
+            hp.choice('num_params', num_params_choice),
+            hp.loguniform('lr', 0.0001, 0.005),
             hp.choice('num_layers', num_layers_choice),
-            hp.choice('batch', batch_choice)
+            hp.choice('z_trans', z_trans_choice),
+            hp.choice('drop_rate', drop_rate_choice)
         ]
 
 
-        def objective(lr, num_layers, batch):
+        def objective(batch, num_params, lr, num_layers, z_trans, drop_rate):
             # The parameters to be optimized
+            global batch_size
+            batch_size = batch
+            global number_of_parameters
+            number_of_parameters = num_params
             global learning_rate
             learning_rate = lr
             global number_of_layers
             number_of_layers = num_layers
-            global batch_size
-            batch_size = batch
+            global z_transformations
+            z_transformations = z_trans
+            global RRU_inner_dropout
+            RRU_inner_dropout = drop_rate
 
             # This might give some clues
             global output_path
-            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/lr{lr}layers{num_layers}batch{batch}"
+            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/batch{batch}num_params{num_params}lr{lr}num_layers{num_layers}z_trans{z_trans}drop_rate{drop_rate}"
 
             global HIDDEN_UNITS
             global model_function
@@ -735,4 +752,4 @@ if __name__ == '__main__':  # Main function
 
         from utils import print_trials_information
 
-        print_trials_information(tpe_trials, choices, metric="Perplexity")
+        print_trials_information(tpe_trials, choices, hyperopt_loguniforms=loguniforms, metric="Perplexity")

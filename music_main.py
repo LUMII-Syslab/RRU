@@ -87,8 +87,9 @@ HIDDEN_UNITS = 128 * 3  # This will only be used if the number_of_parameters is 
 number_of_parameters = 1000000  # 1 million learnable parameters
 learning_rate = 0.001
 number_of_layers = 2
+do_hyperparameter_optimization = True
 RRU_inner_dropout = 0.2
-do_hyperparameter_optimization = False
+z_transformations = 2
 
 ckpt_path = 'ckpt_music/'
 log_path = 'logdir_music/'
@@ -125,7 +126,7 @@ class MusicModel:
         cells = []
         for _ in range(number_of_layers):
             if has_training_bool:
-                cell = cell_fn(hidden_units, training=training, dropout_rate=RRU_inner_dropout)
+                cell = cell_fn(hidden_units, training=training, dropout_rate=RRU_inner_dropout, z_transformations=z_transformations)
             else:
                 cell = cell_fn(hidden_units)
             cells.append(cell)
@@ -430,41 +431,52 @@ if __name__ == '__main__':  # Main function
 
         MODEL.evaluate(TESTING_DATA)  # Test the last saved model
     else:
-        times_to_evaluate = 2
+        times_to_evaluate = 100
 
-        lr_choice = [0.1, 0.05, 0.01, 0.005, 0.001]
-        inner_drop_choice = [0., 0.1, 0.2, 0.3, 0.4]
+        # Max batch_sizes: JSB Chorales 76; MuseData 124; Nottingham 170; Piano-midi.de 12
+        batch_choice = [8, 16, 32, 64]
+        num_params_choice = [250000, 500000, 1000000, 2000000, 4000000]
         num_layers_choice = [1, 2, 3]
-        batch_choice = [1, 2, 4, 8, 16, 32, 64]
+        z_trans_choice = [1, 2, 3]
+        drop_rate_choice = [0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
         # We need this, so we can print the hp.choice answers normally
         choices = {
-            'lr': lr_choice,
-            'inner_drop': inner_drop_choice,
+            'batch': batch_choice,
+            'num_params': num_params_choice,
             'num_layers': num_layers_choice,
-            'batch': batch_choice
+            'z_trans': z_trans_choice,
+            'drop_rate': drop_rate_choice
         }
+        loguniforms = ['lr']
 
         space = [
-            hp.choice('lr', lr_choice),
-            hp.choice('inner_drop', inner_drop_choice),
+            hp.choice('batch', batch_choice),
+            hp.choice('num_params', num_params_choice),
+            hp.loguniform('lr', 0.0001, 0.005),
             hp.choice('num_layers', num_layers_choice),
-            hp.choice('batch', batch_choice)
+            hp.choice('z_trans', z_trans_choice),
+            hp.choice('drop_rate', drop_rate_choice)
         ]
 
-        def objective(lr, inner_drop, num_layers, batch):
+
+        def objective(batch, num_params, lr, num_layers, z_trans, drop_rate):
             # The parameters to be optimized
-            global learning_rate
-            learning_rate = lr
-            global RRU_inner_dropout
-            RRU_inner_dropout = inner_drop
-            global number_of_layers
-            number_of_layers = num_layers
             global batch_size
             batch_size = batch
+            global number_of_parameters
+            number_of_parameters = num_params
+            global learning_rate
+            learning_rate = lr
+            global number_of_layers
+            number_of_layers = num_layers
+            global z_transformations
+            z_transformations = z_trans
+            global RRU_inner_dropout
+            RRU_inner_dropout = drop_rate
 
             # This might give some clues
             global output_path
-            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/lr{lr}drop{inner_drop}layers{num_layers}batch{batch}"
+            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/batch{batch}num_params{num_params}lr{lr}num_layers{num_layers}z_trans{z_trans}drop_rate{drop_rate}"
 
             global HIDDEN_UNITS
             global model_function
@@ -493,4 +505,4 @@ if __name__ == '__main__':  # Main function
 
         from utils import print_trials_information
 
-        print_trials_information(tpe_trials, choices, metric="NLL")
+        print_trials_information(tpe_trials, choices, hyperopt_loguniforms=loguniforms, metric="NLL")

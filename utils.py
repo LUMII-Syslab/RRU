@@ -112,7 +112,10 @@ def print_trainable_variables():
 
 
 # Self-made function to get a readable hyperopt output
-def print_trials_information(hyperopt_trials, hyperopt_choices, metric="Loss", reverse_sign=False):
+def print_trials_information(hyperopt_trials, hyperopt_choices, hyperopt_loguniforms=None, metric="Loss",
+                             reverse_sign=False):
+    if hyperopt_loguniforms is None:
+        hyperopt_loguniforms = []
 
     def print_trial_information(single_trial):
         # keys(['state', 'tid', 'spec', 'result', 'misc', 'exp_key', 'owner', 'version', 'book_time', 'refresh_time'])
@@ -122,6 +125,8 @@ def print_trials_information(hyperopt_trials, hyperopt_choices, metric="Loss", r
 
             if variable in hyperopt_choices.keys():
                 value = hyperopt_choices[variable][value]
+            elif variable in hyperopt_loguniforms:
+                value = np.log(value)
 
             print(f"    {variable} = {value}")
         if reverse_sign:
