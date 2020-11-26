@@ -713,7 +713,7 @@ if __name__ == '__main__':  # Main function
             global number_of_parameters
             number_of_parameters = num_params
             global learning_rate
-            learning_rate = lr
+            learning_rate = np.log(lr)
             global number_of_layers
             number_of_layers = num_layers
             global z_transformations

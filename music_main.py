@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 import time
 from datetime import datetime  # We'll use this to dynamically generate training event names
 
@@ -20,8 +21,8 @@ from hyperopt import hp, tpe, Trials, fmin
 from adam_decay import AdamOptimizer_decay
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 #
 # You can check if this line makes it train faster, while still training correctly
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
@@ -466,7 +467,7 @@ if __name__ == '__main__':  # Main function
             global number_of_parameters
             number_of_parameters = num_params
             global learning_rate
-            learning_rate = lr
+            learning_rate = np.log(lr)
             global number_of_layers
             number_of_layers = num_layers
             global z_transformations

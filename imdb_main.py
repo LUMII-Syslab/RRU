@@ -22,8 +22,8 @@ from hyperopt import hp, tpe, Trials, fmin
 from adam_decay import AdamOptimizer_decay
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 #
 # You can check if this line makes it train faster, while still training correctly
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
@@ -398,6 +398,7 @@ if __name__ == '__main__':  # Main function
 
         MODEL.evaluate(X_TEST, Y_TEST)
     else:
+        # This needs better hyperparameter config (didn't update it yet, because didn't run it yet)
         times_to_evaluate = 2
 
         lr_choice = [0.1, 0.05, 0.01, 0.005, 0.001]
