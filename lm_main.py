@@ -707,13 +707,15 @@ if __name__ == '__main__':  # Main function
 
 
         def objective(batch, num_params, lr, num_layers, z_trans, drop_rate):
-            # The parameters to be optimized
+            # We have to take the log from these to get a usable value
+            lr = np.log(lr)
+            # We'll optimize these parameters
             global batch_size
             batch_size = batch
             global number_of_parameters
             number_of_parameters = num_params
             global learning_rate
-            learning_rate = np.log(lr)
+            learning_rate = lr
             global number_of_layers
             number_of_layers = num_layers
             global z_transformations
