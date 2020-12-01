@@ -74,7 +74,8 @@ class RRUCell(LayerRNNCell):
                  group_size=32,
                  activation=None,
                  reuse=None,
-                 training=True,
+                 training=False,
+                 z_transformations=1,
                  dropout_rate=0.2,
                  residual_weight_initial_value=0.95,  # in range (0 - 1]
                  name=None,
@@ -100,6 +101,7 @@ class RRUCell(LayerRNNCell):
         self._kernel_initializer = None
         self._bias_initializer = tf.zeros_initializer()
         self._group_size = group_size
+        self._z_transformations = z_transformations
         self._training = training
         self._dropout_rate = dropout_rate
         assert residual_weight_initial_value > 0 and residual_weight_initial_value <= 1
@@ -121,14 +123,38 @@ class RRUCell(LayerRNNCell):
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
         n_middle_maps = 2 * total  # TODO find the optimal value
-        self._Z_kernel = self.add_variable(
+        self._Z_kernel = []
+        self._Z_bias = []
+        for i in range(self._z_transformations):
+            if i == 0:  # The first Z transformation has different shape
+                z_kernel = self.add_variable(
+                    "Z/%s" % _WEIGHTS_VARIABLE_NAME,
+                    shape=[total, n_middle_maps],
+                    initializer=self._kernel_initializer)
+                z_bias = self.add_variable(
+                    "Z/%s" % _BIAS_VARIABLE_NAME,
+                    shape=[n_middle_maps],
+                    initializer=self._bias_initializer)
+            else:
+                z_kernel = self.add_variable(
+                    f"Z{i + 1}/%s" % _WEIGHTS_VARIABLE_NAME,
+                    shape=[n_middle_maps, n_middle_maps],
+                    initializer=self._kernel_initializer)
+                z_bias = self.add_variable(
+                    f"Z{i + 1}/%s" % _BIAS_VARIABLE_NAME,
+                    shape=[n_middle_maps],
+                    initializer=self._bias_initializer)
+            self._Z_kernel.append(z_kernel)
+            self._Z_bias.append(z_bias)
+        # Single _Z_kernel and _Z_bias, without no lists
+        '''self._Z_kernel = self.add_variable(
             "Z/%s" % _WEIGHTS_VARIABLE_NAME,
             shape=[total, n_middle_maps],
             initializer=self._kernel_initializer)
         self._Z_bias = self.add_variable(
             "Z/%s" % _BIAS_VARIABLE_NAME,
             shape=[n_middle_maps],
-            initializer=self._bias_initializer)
+            initializer=self._bias_initializer)'''
         self.S_bias_variable = self.add_variable(
             "S/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
@@ -169,26 +195,33 @@ class RRUCell(LayerRNNCell):
         state_drop = state
         input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
 
-        # Go through first, Z transformation
-        after_z = math_ops.matmul(input_and_state, self._Z_kernel) + self._Z_bias
+        z_start = input_and_state  # This will hold the info that Z transformation has to transform
+        # Go through first transformation(s) - Z
+        for i in range(self._z_transformations):
+            # Multiply the matrices
+            after_z = math_ops.matmul(z_start, self._Z_kernel[i]) + self._Z_bias[i]
 
-        # group_size = self._group_size
-        # # Do normalization
-        # if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
-        #     # Do instance normalization
-        #     after_norm = instance_norm(after_z)
-        # else:
-        #     # Do group normalization
-        #     after_norm = group_norm(after_z, group_size)
+            if i == 0:  # For the first Z transformation do normalization (that's what we did for 2_a)
+                # 1. Do group normalization
+                # group_size = self._group_size
+                # # Do normalization
+                # if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
+                #     # Do instance normalization
+                #     after_norm = instance_norm(after_z)
+                # else:
+                #     # Do group normalization
+                #     after_norm = group_norm(after_z, group_size)
+                # Or 2. Do instance normalization
+                after_z = instance_norm(after_z)
 
-        after_norm = instance_norm(after_z)  # If you can't get upper part working
+            # 1. Do GELU activation
+            # after_activation = gelu(after_z)
+            # Or 2. Do ReLU activation
+            after_activation = tf.nn.relu(after_z)
 
-        # 1. Do GELU activation
-        # after_activation = gelu(after_norm)
-        # Or 2. Do ReLU activation
-        after_activation = tf.nn.relu(after_norm)
+            z_start = after_activation
 
-        after_dropout = tf.nn.dropout(after_activation, rate=dropout_rate)
+        after_dropout = tf.nn.dropout(z_start, rate=dropout_rate)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_dropout, self._W_kernel) + self._W_bias
