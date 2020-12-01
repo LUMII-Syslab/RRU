@@ -49,10 +49,16 @@ def analyse_data(data_path=unchanged_data_path, mode="full"):
             for item, description in [(train, "Train"), (valid, "Valid"), (test, "Test")]:
                 big_sequences = len(item)
                 middle_sequences = [None, None]
+                middle_sequence_length_distribution = {}
                 small_sequences = [None, None]
                 value_range = [None, None]
 
                 for seq in item:
+                    middle_sequence_length_in_hundreds = len(seq) // 100
+                    if middle_sequence_length_in_hundreds in middle_sequence_length_distribution:
+                        middle_sequence_length_distribution[middle_sequence_length_in_hundreds] += 1
+                    else:
+                        middle_sequence_length_distribution[middle_sequence_length_in_hundreds] = 1
                     middle_sequences[0] = smallest(middle_sequences[0], len(seq))
                     middle_sequences[1] = biggest(middle_sequences[1], len(seq))
 
@@ -68,6 +74,10 @@ def analyse_data(data_path=unchanged_data_path, mode="full"):
                     print(12 * ' ', description)  # Train, Valid, Test
                     print(18 * ' ', f"Big sequences - {big_sequences}")
                     print(18 * ' ', f"Middle sequences - from {middle_sequences[0]} to {middle_sequences[1]}")
+                    print(18 * ' ', end=" Middle sequence length distribution: | ")
+                    for key in sorted(middle_sequence_length_distribution.keys()):
+                        print(f"[{key * 100} - {(key + 1) * 100 - 1}]: {middle_sequence_length_distribution[key]}", end=" | ")
+                    print()
                     print(18 * ' ', f"Small sequences - from {small_sequences[0]} to {small_sequences[1]}")
                     print(18 * ' ', f"Range - from {value_range[0]} to {value_range[1]}")
 
@@ -161,7 +171,7 @@ if __name__ == '__main__':  # Main function
     prepare_data("Nottingham")  # [[[ : empty-[]
     prepare_data("Piano-midi.de")  # [[[ : empty-[]
 
-    analyse_data(data_path=prepared_data_path, mode="mini")
+    analyse_data(data_path=prepared_data_path, mode="full")
 
 
 def load_data(name):
