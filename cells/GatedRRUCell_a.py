@@ -221,9 +221,9 @@ class RRUCell(LayerRNNCell):
                 after_z = instance_norm(after_z)
 
             # 1. Do GELU activation
-            after_activation = gelu(after_z)
+            # after_activation = gelu(after_z)
             # Or 2. Do ReLU activation
-            # after_activation = tf.nn.relu(after_norm)
+            after_activation = tf.nn.relu(after_z)
 
             z_start = after_activation
 

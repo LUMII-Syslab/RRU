@@ -183,13 +183,15 @@ class RRUCell(LayerRNNCell):
 
         after_norm = instance_norm(after_z)  # If you can't get upper part working
 
-        # Do GELU activation
-        after_gelu = gelu(after_norm)
+        # 1. Do GELU activation
+        # after_activation = gelu(after_norm)
+        # Or 2. Do ReLU activation
+        after_activation = tf.nn.relu(after_norm)
 
-        after_gelu = tf.nn.dropout(after_gelu, rate=dropout_rate)
+        after_dropout = tf.nn.dropout(after_activation, rate=dropout_rate)
 
         # Go through the second transformation - W
-        after_w = math_ops.matmul(after_gelu, self._W_kernel) + self._W_bias
+        after_w = math_ops.matmul(after_dropout, self._W_kernel) + self._W_bias
         # after_w -= tf.reduce_mean(after_w, axis=-1, keepdims=True)
         candidate = after_w[:,0:self._num_units]
         output = after_w[:, self._num_units:]
