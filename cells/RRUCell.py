@@ -1,111 +1,70 @@
 # Code reference - https://github.com/tensorflow/tensorflow/blob/v2.2.0/tensorflow/python/ops/rnn_cell_impl.py#L484-L614
-"""Module implementing RNN Cells.
-This module provides a number of basic commonly used RNN cells, such as LSTM
-(Long Short Term Memory) or GRU (Gated Recurrent Unit), and a number of
-operators that allow adding dropouts, projections, or embeddings for inputs.
-Constructing multi-layer cells is supported by the class `MultiRNNCell`, or by
-calling the `rnn` ops several times.
-"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
 import numpy as np
-from tensorflow.python.eager import context
-from tensorflow.python.framework import dtypes
-from tensorflow.python.keras import activations
-from tensorflow.python.keras import initializers
 from tensorflow.python.keras.engine import input_spec
 from tensorflow.python.keras.utils import tf_utils
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import math_ops
-from tensorflow.python.ops import nn_ops
-from tensorflow.python.ops.rnn_cell_impl import LayerRNNCell
-from tensorflow.python.platform import tf_logging as logging
-from tensorflow.python.util import nest
-from tensorflow.python.util.deprecation import deprecated
+from tensorflow.python.ops.rnn_cell_impl import LayerRNNCell, _check_supported_dtypes, _check_rnn_cell_input_dtypes
 
 _BIAS_VARIABLE_NAME = "bias"
 _WEIGHTS_VARIABLE_NAME = "kernel"
 
 
-def inv_sigmoid(y):
-    return np.log(y / (1 - y))
-
-
-# residual_weight = 0.95  # r
-# candidate_weight = np.sqrt(1 - residual_weight ** 2) * 0.25  # h
-# S_initial_value = inv_sigmoid(residual_weight)
-
-
 class RRUCell(LayerRNNCell):
-    """Residual Recurrent Unit cell.
-    Note that this cell is not optimized for performance. It might be wise to implement it with
-    `tf.contrib.cudnn_rnn.CudnnGRU` for better performance on GPU, or
-    `tf.contrib.rnn.GRUBlockCellV2` for better performance on CPU.
+    """Residual Recurrent Unit (RRU) cell.
     Args:
-        num_units: int, The number of units in the GRU cell.
-        activation: Nonlinearity to use.  Default: `tanh`.
+        num_units: int, The number of units in the RRU cell.
+        output_size: int, The size of the RRU output.
+        z_transformations: int, The number of Z transformations in the RRU cell.
+        middle_layer_size_multiplier: int, The size multiplier for transformation layer in the RRU cell.
+        dropout_rate: float, The dropout rate used after the W transformation.
+        residual_weight_initial_value: float, Value of the residual weight (must be in range (0 - 1]).
+        training: boolean, To let know whether the RRU cell is in training or not.
         reuse: (optional) Python boolean describing whether to reuse variables in an
             existing scope.  If not `True`, and the existing scope already has the
             given variables, an error is raised.
-        kernel_initializer: (optional) The initializer to use for the weight and
-            projection matrices.
-        bias_initializer: (optional) The initializer to use for the bias.
         name: String, the name of the layer. Layers with the same name will share
             weights, but to avoid mistakes we require reuse=True in such cases.
         dtype: Default dtype of the layer (default of `None` means use the type of
             the first input). Required when `build` is called before `call`.
         **kwargs: Dict, keyword named properties for common layer attributes, like
             `trainable` etc when constructing the cell from configs of get_config().
-            References:
-        Learning Phrase Representations using RNN Encoder Decoder for Statistical
-        Machine Translation:
-            [Cho et al., 2014]
-            (https://aclanthology.coli.uni-saarland.de/papers/D14-1179/d14-1179)
-            ([pdf](http://emnlp2014.org/papers/pdf/EMNLP2014179.pdf))
     """
 
     def __init__(self,
                  num_units,
                  output_size=256,
-                 group_size=32,
-                 activation=None,
-                 reuse=None,
-                 training=False,
                  z_transformations=1,
+                 middle_layer_size_multiplier=2,  # TODO: find the optimal value (this goes to n_middle_maps)
                  dropout_rate=0.2,
-                 residual_weight_initial_value=0.95,  # in range (0 - 1]
+                 residual_weight_initial_value=0.95,
+                 training=False,
+                 reuse=None,
                  name=None,
                  dtype=None,
                  **kwargs):
         super(RRUCell, self).__init__(_reuse=reuse, name=name, dtype=dtype, **kwargs)
         _check_supported_dtypes(self.dtype)
 
-        if context.executing_eagerly() and context.num_gpus() > 0:
-            logging.warn(
-                "%s: Note that this cell is not optimized for performance. "
-                "We could try to implement RRU with tf.contrib.cudnn_rnn.CudnnGRU as base for better "
-                "performance on GPU.", self)
         # Inputs must be 2-dimensional.
         self.input_spec = input_spec.InputSpec(ndim=2)
 
         self._num_units = num_units
         self._output_size = output_size
-        if activation:
-            self._activation = activations.get(activation)
-        else:
-            self._activation = math_ops.tanh
+        self._z_transformations = z_transformations
+        self._middle_layer_size_multiplier = middle_layer_size_multiplier
+        self._dropout_rate = dropout_rate
+        assert 0 < residual_weight_initial_value <= 1
+        self._residual_weight_initial_value = residual_weight_initial_value
+        self._training = training
         self._kernel_initializer = None
         self._bias_initializer = tf.zeros_initializer()
-        self._group_size = group_size
-        self._z_transformations = z_transformations
-        self._training = training
-        self._dropout_rate = dropout_rate
-        assert residual_weight_initial_value > 0 and residual_weight_initial_value <= 1
-        self.residual_weight_initial_value = residual_weight_initial_value
 
     @property
     def state_size(self):
@@ -122,11 +81,11 @@ class RRUCell(LayerRNNCell):
         _check_supported_dtypes(self.dtype)
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
-        n_middle_maps = 2 * total  # TODO find the optimal value
+        n_middle_maps = self._middle_layer_size_multiplier * total
         self._Z_kernel = []
         self._Z_bias = []
         for i in range(self._z_transformations):
-            if i == 0:  # The first Z transformation has different shape
+            if i == 0:  # The first Z transformation has a different shape
                 z_kernel = self.add_variable(
                     "Z/%s" % _WEIGHTS_VARIABLE_NAME,
                     shape=[total, n_middle_maps],
@@ -146,149 +105,88 @@ class RRUCell(LayerRNNCell):
                     initializer=self._bias_initializer)
             self._Z_kernel.append(z_kernel)
             self._Z_bias.append(z_bias)
-        # Single _Z_kernel and _Z_bias, without no lists
-        '''self._Z_kernel = self.add_variable(
-            "Z/%s" % _WEIGHTS_VARIABLE_NAME,
-            shape=[total, n_middle_maps],
-            initializer=self._kernel_initializer)
-        self._Z_bias = self.add_variable(
-            "Z/%s" % _BIAS_VARIABLE_NAME,
-            shape=[n_middle_maps],
-            initializer=self._bias_initializer)'''
         self.S_bias_variable = self.add_variable(
             "S/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
-            initializer=init_ops.constant_initializer(inv_sigmoid(self.residual_weight_initial_value / 1.5), dtype=self.dtype))
-        self.S_bias = tf.sigmoid(self.S_bias_variable)*1.5
+            initializer=init_ops.constant_initializer(inv_sigmoid(self._residual_weight_initial_value / 1.5), dtype=self.dtype))
+        self.S_bias = tf.sigmoid(self.S_bias_variable) * 1.5
         self._W_kernel = self.add_variable(
             "W/%s" % _WEIGHTS_VARIABLE_NAME,
-            shape=[n_middle_maps, self._num_units+self._output_size],
+            shape=[n_middle_maps, self._num_units + self._output_size],
             initializer=self._kernel_initializer)
         self._W_bias = self.add_variable(
             "W/%s" % _BIAS_VARIABLE_NAME,
-            shape=[self._num_units+self._output_size],
+            shape=[self._num_units + self._output_size],
             initializer=self._bias_initializer)
         self._W_mul = self.add_variable(
             "W_smul/%s" % _BIAS_VARIABLE_NAME,
             shape=(),
             initializer=tf.zeros_initializer())
 
-        # self.prev_state_weight = self.add_variable(  # todo: check if needed
-        #     "prev_state_weight/%s"% _BIAS_VARIABLE_NAME,
-        #     shape=(),
-        #     initializer=tf.ones_initializer())
-
         self.built = True
 
     def call(self, inputs, state):
-        """Residual recurrent unit (RRU) with nunits cells."""
         _check_rnn_cell_input_dtypes([inputs, state])
 
+        # If the cell is training, we should apply the given dropout
         if self._training:
             dropout_rate = self._dropout_rate
         else:
             dropout_rate = 0.
 
-        # LOWER PART OF THE CELL
         # Concatenate input and last state
-        # state_drop = tf.nn.dropout(state, rate=dropout_rate)
-        state_drop = state
-        input_and_state = array_ops.concat([inputs, state_drop], 1)  # Inputs are batch_size x depth
+        input_and_state = array_ops.concat([inputs, state], 1)  # Inputs are batch_size x depth
 
-        z_start = input_and_state  # This will hold the info that Z transformation has to transform
         # Go through first transformation(s) - Z
+        z_start = input_and_state  # This will hold the info that each Z transformation has to transform
         for i in range(self._z_transformations):
             # Multiply the matrices
             after_z = math_ops.matmul(z_start, self._Z_kernel[i]) + self._Z_bias[i]
 
-            if i == 0:  # For the first Z transformation do normalization (that's what we did for 2_a)
-                # 1. Do group normalization
-                # group_size = self._group_size
-                # # Do normalization
-                # if group_size is None or group_size < 1 or group_size >= after_z.shape[1]:
-                #     # Do instance normalization
-                #     after_norm = instance_norm(after_z)
-                # else:
-                #     # Do group normalization
-                #     after_norm = group_norm(after_z, group_size)
-                # Or 2. Do instance normalization
+            if i == 0:  # For the first Z transformation do normalization
+                # Do instance normalization
                 after_z = instance_norm(after_z)
 
-            # 1. Do GELU activation
-            # after_activation = gelu(after_z)
-            # Or 2. Do ReLU activation
+            # Do ReLU activation
             after_activation = tf.nn.relu(after_z)
 
+            # Update the z_start variable with the newest values
             z_start = after_activation
 
+        # Apply dropout
         after_dropout = tf.nn.dropout(z_start, rate=dropout_rate)
 
         # Go through the second transformation - W
         after_w = math_ops.matmul(after_dropout, self._W_kernel) + self._W_bias
-        # after_w -= tf.reduce_mean(after_w, axis=-1, keepdims=True)
-        candidate = after_w[:,0:self._num_units]
+
+        # Calculate the output
         output = after_w[:, self._num_units:]
 
-        # Merge upper and lower parts
-        # final = math_ops.sigmoid(self._S_bias) * state + after_w * candidate_weight
-        final = state * self.S_bias + candidate * self._W_mul  # * np.sqrt(1.0/200)
+        # Calculate the state's final values
+        candidate = after_w[:, 0:self._num_units]
 
-        return output, final
+        final_state = state * self.S_bias + candidate * self._W_mul
+
+        return output, final_state
 
     def zero_state(self, batch_size, dtype):
         value = super().zero_state(batch_size, dtype)
-        initial = np.asarray([1]+[0]*(self._num_units-1))*np.sqrt(self._num_units)*0.25
-        return value+initial
+        initial = np.asarray([1] + [0] * (self._num_units - 1)) * np.sqrt(self._num_units) * 0.25
+        return value + initial
 
     def get_config(self):
         config = {
             "num_units": self._num_units,
-            "kernel_initializer": initializers.serialize(self._kernel_initializer),
-            "bias_initializer": initializers.serialize(self._bias_initializer),
-            "activation": activations.serialize(self._activation),
+            "output_size": self._output_size,
             "reuse": self._reuse,
+            "training": self._training,
+            "z_transformations": self._z_transformations,
+            "middle_layer_size_multiplier": self._middle_layer_size_multiplier,
+            "dropout_rate": self._dropout_rate,
+            "residual_weight_initial_value": self._residual_weight_initial_value
         }
         base_config = super(RRUCell, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-
-
-def _check_rnn_cell_input_dtypes(inputs):
-    """Check whether the input tensors are with supported dtypes.
-    Default RNN cells only support floats and complex as its dtypes since the
-    activation function (tanh and sigmoid) only allow those types. This function
-    will throw a proper error message if the inputs is not in a supported type.
-    Args:
-        inputs: tensor or nested structure of tensors that are feed to RNN cell as
-            input or state.
-        Raises:
-            ValueError: if any of the input tensor are not having dtypes of float or
-            complex.
-    """
-    for t in nest.flatten(inputs):
-        _check_supported_dtypes(t.dtype)
-
-
-def _check_supported_dtypes(dtype):
-    if dtype is None:
-        return
-    dtype = dtypes.as_dtype(dtype)
-    if not (dtype.is_floating or dtype.is_complex):
-        raise ValueError("RRU cell only supports floating point inputs, " "but saw dtype: %s" % dtype)
-
-
-def gelu(x):
-    return x * tf.sigmoid(1.702 * x)
-
-
-def group_norm(cur, group_size):
-    shape = tf.shape(cur)  # runtime shape
-    n_units = cur.get_shape().as_list()[-1]  # static shape
-    n_groups = n_units//group_size
-    assert group_size*n_groups == n_units
-    cur = tf.reshape(cur, [-1]+[n_groups]+[group_size])
-    cur = instance_norm(cur)
-    cur = tf.reshape(cur, shape)
-    return cur
 
 
 def instance_norm(cur):
@@ -296,3 +194,7 @@ def instance_norm(cur):
     variance = tf.reduce_mean(tf.square(cur), [-1], keepdims=True)
     cur = cur * tf.rsqrt(variance + 1e-6)
     return cur
+
+
+def inv_sigmoid(y):
+    return np.log(y / (1 - y))
