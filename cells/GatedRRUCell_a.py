@@ -41,6 +41,7 @@ class RRUCell(LayerRNNCell):
                  z_transformations=1,
                  middle_layer_size_multiplier=2,  # TODO: find the optimal value (this goes to n_middle_maps)
                  dropout_rate=0.2,
+                 gate_bias = 1.0,
                  training=False,
                  reuse=None,
                  name=None,
@@ -60,6 +61,7 @@ class RRUCell(LayerRNNCell):
         self._training = training
         self._kernel_initializer = None
         self._bias_initializer = tf.zeros_initializer()
+        self._gate_bias = gate_bias
 
     @property
     def state_size(self):
@@ -151,7 +153,7 @@ class RRUCell(LayerRNNCell):
         # Calculate the state's final values
         candidate = after_w[:, 0:self._num_units] * 0.25
         gate = after_w[:, self._num_units:2 * self._num_units]
-        gate = tf.sigmoid(gate + 1)
+        gate = tf.sigmoid(gate + self._gate_bias)
 
         final_state = state * gate + candidate * (1 - gate)
 

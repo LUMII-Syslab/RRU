@@ -120,7 +120,7 @@ class RRUCell(LayerRNNCell):
             initializer=self._bias_initializer)
         self._W_mul = self.add_variable(
             "W_smul/%s" % _BIAS_VARIABLE_NAME,
-            shape=(),
+            shape=[self._num_units],
             initializer=tf.zeros_initializer())
 
         self.built = True

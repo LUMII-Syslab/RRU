@@ -188,8 +188,8 @@ class LMModel:
         # Instantiate biases
         bias = tf.Variable(tf.constant(0.0, shape=[vocabulary_size]))
 
-        # Apply GELU activation
-        value = gelu(value)
+        # Optionally apply relu activation for RRU and GRRUA cells
+        # value = tf.nn.relu(value)
 
         # Reshape the outputs – [batch_size, window_size, final_size] -> [batch_size x window_size, final_size]
         last = tf.reshape(value, shape=(-1, final_size))

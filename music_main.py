@@ -144,8 +144,8 @@ class MusicModel:
                                          initial_state=initial_state,
                                          dtype=tf.float32)
 
-        # Apply sigmoid activation function
-        value = tf.nn.sigmoid(value)
+        # Optionally apply relu activation for RRU and GRRUA cells
+        # value = tf.nn.relu(value)
 
         # Reshape outputs [batch_size, window_size, final_size] -> [batch_size x window_size, final_size]
         last = tf.reshape(value, shape=(-1, final_size))
