@@ -29,26 +29,20 @@ from adam_decay import AdamOptimizer_decay
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "RRU3"  # Here you can type in the name of the cell you want to use
+cell_name = "GRRUA"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
 state_is_tuple = False  # So we can make the RNN cell stateful even for LSTM based cells such as LSTM and MogrifierLSTM
 has_training_bool = False
-if cell_name == "RRU1":  # ReZero version
+if cell_name == "RRU":  # ReZero version
     from cells.RRUCell import RRUCell
     cell_fn = RRUCell
     output_size = 256
     has_training_bool = True
     model_name = 'rru_model'
 
-elif cell_name == "RRU2":  # Gated version with 1 transformation
-    from cells.GatedRRUCell import RRUCell  # (I already have some results with this one)
-    cell_fn = RRUCell
-    has_training_bool = True
-    model_name = 'grru_model'
-
-elif cell_name == "RRU3":  # Gated version with separate output size
+elif cell_name == "GRRUA":  # Gated version with separate output size
     from cells.GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
     has_training_bool = True
