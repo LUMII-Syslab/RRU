@@ -40,8 +40,8 @@ class RRUCell(LayerRNNCell):
                  output_size=256,
                  z_transformations=1,
                  middle_layer_size_multiplier=2,  # TODO: find the optimal value (this goes to n_middle_maps)
-                 dropout_rate=0.2,
-                 gate_bias = 1.0,
+                 dropout_rate=0.5,
+                 gate_bias=1.0,
                  training=False,
                  reuse=None,
                  name=None,
@@ -78,7 +78,7 @@ class RRUCell(LayerRNNCell):
         _check_supported_dtypes(self.dtype)
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
-        n_middle_maps = self._middle_layer_size_multiplier * total
+        n_middle_maps = round(self._middle_layer_size_multiplier * total)
         self._Z_kernel = []
         self._Z_bias = []
         for i in range(self._z_transformations):

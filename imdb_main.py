@@ -449,7 +449,6 @@ if __name__ == '__main__':  # Main function
         # Create trials object
         tpe_trials = Trials()
 
-        # Run 2000 evals with the tpe algorithm
         tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
 
         from utils import print_trials_information

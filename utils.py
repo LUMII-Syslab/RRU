@@ -15,7 +15,7 @@ def get_total_variables():
 def find_optimal_hidden_units(hidden_units,
                               number_of_parameters,
                               model_function,
-                              ensure_divisibility_with_some_powers_of_two=True):
+                              ensure_divisibility_with_some_powers_of_two=False):
     # Inspired from https://github.com/deepmind/lamb/blob/master/lamb/lamb_flags.py
     # They made a version that takes in a config file, which might be more useful to some people
     print(f"Searching for the largest possible hidden unit count"
@@ -112,10 +112,15 @@ def print_trainable_variables():
 
 
 # Self-made function to get a readable hyperopt output
-def print_trials_information(hyperopt_trials, hyperopt_choices, hyperopt_loguniforms=None, metric="Loss",
-                             reverse_sign=False):
-    if hyperopt_loguniforms is None:
-        hyperopt_loguniforms = []
+def print_trials_information(hyperopt_trials, hyperopt_choices=None, reverse_hyperopt_loguniforms=None,
+                             round_uniform=None, metric="Loss", reverse_sign=False):
+
+    if round_uniform is None:
+        round_uniform = []
+    if reverse_hyperopt_loguniforms is None:
+        reverse_hyperopt_loguniforms = {}
+    if hyperopt_choices is None:
+        hyperopt_choices = {}
 
     def print_trial_information(single_trial):
         # keys(['state', 'tid', 'spec', 'result', 'misc', 'exp_key', 'owner', 'version', 'book_time', 'refresh_time'])
@@ -125,8 +130,10 @@ def print_trials_information(hyperopt_trials, hyperopt_choices, hyperopt_logunif
 
             if variable in hyperopt_choices.keys():
                 value = hyperopt_choices[variable][value]
-            elif variable in hyperopt_loguniforms:
-                value = np.log(value)
+            elif variable in reverse_hyperopt_loguniforms.keys():
+                value = reverse_hyperopt_loguniforms[variable][1] - (value - reverse_hyperopt_loguniforms[variable][0])
+            elif variable in round_uniform:
+                value = round(value)
 
             print(f"    {variable} = {value}")
         if reverse_sign:

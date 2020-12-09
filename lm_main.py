@@ -95,7 +95,7 @@ stateful = True  # Should the RNN cell be stateful? If True, you can modify it's
 zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
 outer_dropout = 0  # 0, if you do not want outer dropout
 L2_decay = 0.0
-do_hyperparameter_optimization = True
+do_hyperparameter_optimization = False
 RRU_inner_dropout = 0.2
 z_transformations = 2
 
@@ -688,12 +688,11 @@ if __name__ == '__main__':  # Main function
             'z_trans': z_trans_choice,
             'drop_rate': drop_rate_choice
         }
-        loguniforms = ['lr']
 
         space = [
             hp.choice('batch', batch_choice),
             hp.choice('num_params', num_params_choice),
-            hp.loguniform('lr', 0.0001, 0.005),
+            hp.loguniform('lr', np.log(0.0001), np.log(0.005)),
             hp.choice('num_layers', num_layers_choice),
             hp.choice('z_trans', z_trans_choice),
             hp.choice('drop_rate', drop_rate_choice)
@@ -701,25 +700,21 @@ if __name__ == '__main__':  # Main function
 
 
         def objective(batch, num_params, lr, num_layers, z_trans, drop_rate):
-            # We have to take the log from these to get a usable value
-            lr = np.log(lr)
             # We'll optimize these parameters
-            global batch_size
+            global batch_size, number_of_parameters, learning_rate, number_of_layers
+            global z_transformations, RRU_inner_dropout
             batch_size = batch
-            global number_of_parameters
             number_of_parameters = num_params
-            global learning_rate
             learning_rate = lr
-            global number_of_layers
             number_of_layers = num_layers
-            global z_transformations
             z_transformations = z_trans
-            global RRU_inner_dropout
             RRU_inner_dropout = drop_rate
 
             # This might give some clues
             global output_path
-            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/batch{batch}num_params{num_params}lr{lr}num_layers{num_layers}z_trans{z_trans}drop_rate{drop_rate}"
+            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
+                          f"/batch{batch}num_params{num_params}lr{lr}num_layers{num_layers}z_trans{z_trans}" \
+                          f"drop_rate{drop_rate}"
 
             global HIDDEN_UNITS
             global model_function
@@ -743,9 +738,8 @@ if __name__ == '__main__':  # Main function
         # Create trials object
         tpe_trials = Trials()
 
-        # Run 2000 evals with the tpe algorithm
         tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
 
         from utils import print_trials_information
 
-        print_trials_information(tpe_trials, choices, hyperopt_loguniforms=loguniforms, metric="Perplexity")
+        print_trials_information(tpe_trials, hyperopt_choices=choices, metric="Perplexity")

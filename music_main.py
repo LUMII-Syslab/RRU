@@ -27,7 +27,7 @@ from hyperopt import hp, tpe, Trials, fmin
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "GRRUA"  # Here you can type in the name of the cell you want to use
+cell_name = "RRU"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -76,14 +76,14 @@ fixed_batch_size = False  # With this False it may run some batches on size [bat
 shuffle_data = True  # Should we shuffle the samples?
 # Training
 num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
-break_epochs_no_gain = 3  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
+break_epochs_no_gain = 7  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
 HIDDEN_UNITS = 128 * 3  # This will only be used if the number_of_parameters is None or < 1
 number_of_parameters = 1000000  # 1 million learnable parameters
 learning_rate = 0.001
-number_of_layers = 2
+number_of_layers = 1
 do_hyperparameter_optimization = True
-RRU_inner_dropout = 0.2
-z_transformations = 2
+middle_layer_size_multiplier = 2
+residual_weight_initial_value = 0.95
 
 ckpt_path = 'ckpt_music/'
 log_path = 'logdir_music/'
@@ -120,7 +120,11 @@ class MusicModel:
         cells = []
         for _ in range(number_of_layers):
             if has_training_bool:
-                cell = cell_fn(hidden_units, training=training, dropout_rate=RRU_inner_dropout, z_transformations=z_transformations)
+                cell = cell_fn(hidden_units,
+                               training=training,
+                               output_size=output_size,
+                               middle_layer_size_multiplier=middle_layer_size_multiplier,
+                               residual_weight_initial_value=residual_weight_initial_value)
             else:
                 cell = cell_fn(hidden_units)
             cells.append(cell)
@@ -427,52 +431,46 @@ if __name__ == '__main__':  # Main function
     else:
         times_to_evaluate = 100
 
-        # Max batch_sizes: JSB Chorales 76; MuseData 124; Nottingham 170; Piano-midi.de 12
-        batch_choice = [8, 16, 32, 64]
-        num_params_choice = [250000, 500000, 1000000, 2000000, 4000000]
-        num_layers_choice = [1, 2, 3]
-        z_trans_choice = [1, 2, 3]
-        drop_rate_choice = [0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-        # We need this, so we can print the hp.choice answers normally
-        choices = {
-            'batch': batch_choice,
-            'num_params': num_params_choice,
-            'num_layers': num_layers_choice,
-            'z_trans': z_trans_choice,
-            'drop_rate': drop_rate_choice
+        # What to do with hp.uniforms that need to be rounded
+        round_uniform = ['num_params', 'out_size']
+        # What to do with reverse hp.loguniform variables
+        reverse_log_uniforms = {
+            'residual_weight': [0.0001, 1]  # It can't be 0
         }
-        loguniforms = ['lr']
 
         space = [
-            hp.choice('batch', batch_choice),
-            hp.choice('num_params', num_params_choice),
-            hp.loguniform('lr', 0.0001, 0.005),
-            hp.choice('num_layers', num_layers_choice),
-            hp.choice('z_trans', z_trans_choice),
-            hp.choice('drop_rate', drop_rate_choice)
+            # hp.uniform
+            hp.uniform('num_params', 1000000, 10000000),
+            hp.uniform('out_size', 32, 256),
+            hp.uniform('middle_multiplier', 0.5, 8),
+            # hp.loguniform
+            hp.loguniform('lr', np.log(0.0004), np.log(0.004)),
+            # Reverse hp.loguniform
+            hp.loguniform('residual_weight', np.log(0.0001), np.log(1))  # It can't be 0
         ]
 
 
-        def objective(batch, num_params, lr, num_layers, z_trans, drop_rate):
-            # We have to take the log from these to get a usable value
-            lr = np.log(lr)
+        def objective(num_params, out_size, middle_multiplier, lr, residual_weight):
+            # For some values we need extra stuff
+            num_params = round(num_params)
+            out_size = round(out_size)
+            # Reverse hp.loguniform - swap difference
+            residual_weight = \
+                reverse_log_uniforms['residual_weight'][1] -\
+                (residual_weight - reverse_log_uniforms['residual_weight'][0])
+
             # We'll optimize these parameters
-            global batch_size
-            batch_size = batch
-            global number_of_parameters
-            number_of_parameters = num_params
-            global learning_rate
+            global learning_rate, number_of_parameters
+            global output_size, middle_layer_size_multiplier, residual_weight_initial_value
             learning_rate = lr
-            global number_of_layers
-            number_of_layers = num_layers
-            global z_transformations
-            z_transformations = z_trans
-            global RRU_inner_dropout
-            RRU_inner_dropout = drop_rate
+            number_of_parameters = num_params
+            output_size = out_size
+            middle_layer_size_multiplier = middle_multiplier
+            residual_weight_initial_value = residual_weight
 
             # This might give some clues
             global output_path
-            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/batch{batch}num_params{num_params}lr{lr}num_layers{num_layers}z_trans{z_trans}drop_rate{drop_rate}"
+            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/num_params{num_params}out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}residual_weight{residual_weight}"
 
             global HIDDEN_UNITS
             global model_function
@@ -501,4 +499,7 @@ if __name__ == '__main__':  # Main function
 
         from utils import print_trials_information
 
-        print_trials_information(tpe_trials, choices, hyperopt_loguniforms=loguniforms, metric="NLL")
+        print_trials_information(hyperopt_trials=tpe_trials,
+                                 round_uniform=round_uniform,
+                                 reverse_hyperopt_loguniforms=reverse_log_uniforms,
+                                 metric="NLL")
