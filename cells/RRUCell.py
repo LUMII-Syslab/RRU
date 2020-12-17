@@ -43,7 +43,7 @@ class RRUCell(LayerRNNCell):
                  z_transformations=1,
                  middle_layer_size_multiplier=2,  # TODO: find the optimal value (this goes to n_middle_maps)
                  dropout_rate=0.5,
-                 residual_weight_initial_value=0.95,
+                 residual_weight_initial_value=0.95,#unused
                  training=False,
                  reuse=None,
                  name=None,
@@ -82,6 +82,7 @@ class RRUCell(LayerRNNCell):
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
         n_middle_maps = round(self._middle_layer_size_multiplier * total)
+        self.mul_lr_multiplier = 10.
         self._Z_kernel = []
         self._Z_bias = []
         for i in range(self._z_transformations):
@@ -108,8 +109,7 @@ class RRUCell(LayerRNNCell):
         self.S_bias_variable = self.add_variable(
             "S/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
-            initializer=init_ops.constant_initializer(inv_sigmoid(self._residual_weight_initial_value / 1.5), dtype=self.dtype))
-        self.S_bias = tf.sigmoid(self.S_bias_variable) * 1.5
+            initializer = init_ops.constant_initializer(inv_sigmoid(np.random.uniform(0.01, 0.99, size=self._num_units)) / self.mul_lr_multiplier, dtype=self.dtype))
         self._W_kernel = self.add_variable(
             "W/%s" % _WEIGHTS_VARIABLE_NAME,
             shape=[n_middle_maps, self._num_units + self._output_size],
@@ -165,7 +165,7 @@ class RRUCell(LayerRNNCell):
         # Calculate the state's final values
         candidate = after_w[:, 0:self._num_units]
 
-        final_state = state * self.S_bias + candidate * self._W_mul
+        final_state = state * tf.sigmoid(self.S_bias_variable * self.mul_lr_multiplier) + candidate * self._W_mul
 
         return output, final_state
 
