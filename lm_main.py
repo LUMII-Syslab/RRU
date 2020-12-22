@@ -12,13 +12,12 @@ from lm_utils import get_input_data_from_indexes
 
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units
-from utils import gelu
 from utils import print_trainable_variables
 # Importing the necessary stuff for hyperparameter optimization
 from hyperopt import hp, tpe, Trials, fmin
 
 # Importing fancier optimizer(s)
-# from RAdam import RAdamOptimizer
+from RAdam import RAdamOptimizer
 from adam_decay import AdamOptimizer_decay
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
@@ -71,33 +70,40 @@ else:
 
 # Hyperparameters
 # Data parameters
-data_set_name = "pennchar"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
+data_set_name = "penn"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
 character_level = True
 if data_set_name in ["penn"]:
     character_level = False
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
-window_size = 512  # This must be 1 or an even number (otherwise loss calculation won't be correct (we do half_loss))
+# If the model isn't stateful or continuous_batches, this must be 1 or an even number (otherwise loss calculation won't
+# be correct (we do half_loss))
+window_size = 512 if character_level else 64
 assert window_size == 1 or window_size % 2 == 0, "Variable window_size must be 1 or an even number!"
-batch_size = 64  # Max batch_sizes: ptb word 137; ptb char 761; enwik8 & text8 = 9765
+batch_size = 64  # Max batch_sizes (on 512 half-sequences): ptb word 137; ptb char 761; enwik8 & text8 = 9765
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
-continuous_batches = True  # Batches go continuously, this might give performance boost with a stateful RNN cell
-shuffle_data = False  # Should we shuffle the samples?
+# We do character-level True, word-level False
+continuous_batches = False  # Batches go continuously, this might give performance boost with a stateful RNN cell
+# We do character-level False, word-level True
+shuffle_data = True  # Should we shuffle the samples?
 # Training
 num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 # If validation perplexity doesn't get lower, after how many epochs we should break (-1 -> disabled)
-break_epochs_no_gain = 3
-number_of_parameters = 24000000  # 24 million learnable parameters
+break_epochs_no_gain = 7
+# 24M everything else, PTB Word 20 mil?
+number_of_parameters = 20000000  # 20 million learnable parameters
 HIDDEN_UNITS = 1024  # This will only be used if the number_of_parameters is None or < 1
-embedding_size = 128
-learning_rate = 0.001  # At 0,001 LSTM and GRU explodes a bit, and at 0.0001 Mogrifier LSTM can't learn, so 0,0005!
+embedding_size = 64  # PTB character-level 16, PTB word-level 64, what for others? 128?
+learning_rate = 0.003  # Each cell needs different - 0,001 LSTM and GRU explodes a bit, Mogrifier can't learn at low
 number_of_layers = 2
-stateful = True  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
+# We do character-level True, word-level False
+stateful = False  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
 zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
 outer_dropout = 0  # 0, if you do not want outer dropout
 L2_decay = 0.0
 do_hyperparameter_optimization = False
-RRU_inner_dropout = 0.2
-z_transformations = 2
+z_transformations = 1
+middle_layer_size_multiplier = 2
+gradient_clipper_on = False
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -143,7 +149,9 @@ class LMModel:
         cells = []
         for _ in range(number_of_layers):
             if has_training_bool:
-                cell = cell_fn(hidden_units, training=training, dropout_rate=RRU_inner_dropout, z_transformations=z_transformations)
+                cell = cell_fn(hidden_units, training=training, z_transformations=z_transformations,
+                               middle_layer_size_multiplier=middle_layer_size_multiplier,
+                               output_size=output_size)
             else:
                 cell = cell_fn(hidden_units)
             cells.append(cell)
@@ -238,9 +246,15 @@ class LMModel:
 
         # Declare our optimizer, we have to check which one works better.
         # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
-        optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
-                                        L2_decay=L2_decay,
-                                        decay_vars=decay_vars).minimize(loss)
+        if gradient_clipper_on:
+            optimizer = RAdamOptimizer(learning_rate=learning_rate,
+                                       L2_decay=0.0,
+                                       decay_vars=decay_vars,
+                                       clip_gradients=True, clip_multiplier=10.).minimize(loss)
+        else:
+            optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
+                                            L2_decay=L2_decay,
+                                            decay_vars=decay_vars).minimize(loss)
         # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
@@ -673,48 +687,69 @@ if __name__ == '__main__':  # Main function
 
         MODEL.evaluate(TESTING_DATA)  # Test the last saved model
     else:
-        times_to_evaluate = 50
+        times_to_evaluate = 100
 
-        batch_choice = [16, 32, 64]  # @210th server we can't fit more than 64 (128 throws inUse)
-        num_params_choice = [12000000, 18000000, 24000000, 30000000, 36000000]
+        # hp.choice
+        batch_choice = [16, 32, 64, 128]
         num_layers_choice = [1, 2, 3]
         z_trans_choice = [1, 2, 3]
-        drop_rate_choice = [0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
         # We need this, so we can print the hp.choice answers normally
         choices = {
             'batch': batch_choice,
-            'num_params': num_params_choice,
             'num_layers': num_layers_choice,
-            'z_trans': z_trans_choice,
-            'drop_rate': drop_rate_choice
+            'z_trans': z_trans_choice
+        }
+
+        # What to do with hp.uniforms that need to be rounded
+        round_uniform = ['num_params', 'out_size']
+        # What to do with reverse hp.loguniform variables
+        reverse_log_uniforms = {
+            'residual_weight': [0.0001, 1]  # It can't be 0
         }
 
         space = [
+            # hp.choice
             hp.choice('batch', batch_choice),
-            hp.choice('num_params', num_params_choice),
-            hp.loguniform('lr', np.log(0.0001), np.log(0.005)),
             hp.choice('num_layers', num_layers_choice),
             hp.choice('z_trans', z_trans_choice),
-            hp.choice('drop_rate', drop_rate_choice)
+            # hp.uniform
+            hp.uniform('num_params', 10000000, 30000000),
+            hp.uniform('out_size', 32, 256),
+            hp.uniform('middle_multiplier', 0.1, 8),
+            # hp.loguniform
+            hp.loguniform('lr', np.log(0.0004), np.log(0.004)),
+            # Reverse hp.loguniform
+            hp.loguniform('residual_weight', np.log(0.0001), np.log(1))  # It can't be 0
         ]
 
 
-        def objective(batch, num_params, lr, num_layers, z_trans, drop_rate):
+        def objective(batch, num_layers, z_trans, num_params, out_size, middle_multiplier, lr, residual_weight):
+            # For some values we need extra stuff
+            num_params = round(num_params)
+            out_size = round(out_size)
+            # Reverse hp.loguniform - swap difference
+            residual_weight = \
+                reverse_log_uniforms['residual_weight'][1] - \
+                (residual_weight - reverse_log_uniforms['residual_weight'][0])
+
             # We'll optimize these parameters
-            global batch_size, number_of_parameters, learning_rate, number_of_layers
-            global z_transformations, RRU_inner_dropout
+            global batch_size, number_of_layers, number_of_parameters, learning_rate
+            global z_transformations, output_size, middle_layer_size_multiplier, residual_weight_initial_value
             batch_size = batch
-            number_of_parameters = num_params
-            learning_rate = lr
             number_of_layers = num_layers
             z_transformations = z_trans
-            RRU_inner_dropout = drop_rate
+            number_of_parameters = num_params
+            output_size = out_size
+            middle_layer_size_multiplier = middle_multiplier
+            learning_rate = lr
+            residual_weight_initial_value = residual_weight
 
             # This might give some clues
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
-                          f"/batch{batch}num_params{num_params}lr{lr}num_layers{num_layers}z_trans{z_trans}" \
-                          f"drop_rate{drop_rate}"
+                          f"/batch{batch}num_layers{num_layers}z_trans{z_trans}num_params{num_params}" \
+                          f"out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}" \
+                          f"residual_weight{residual_weight}"
 
             global HIDDEN_UNITS
             global model_function
@@ -742,4 +777,8 @@ if __name__ == '__main__':  # Main function
 
         from utils import print_trials_information
 
-        print_trials_information(tpe_trials, hyperopt_choices=choices, metric="Perplexity")
+        print_trials_information(tpe_trials,
+                                 hyperopt_choices=choices,
+                                 round_uniform=round_uniform,
+                                 reverse_hyperopt_loguniforms=reverse_log_uniforms,
+                                 metric="Perplexity")
