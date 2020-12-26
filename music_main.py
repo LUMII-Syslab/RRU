@@ -27,7 +27,7 @@ from hyperopt import hp, tpe, Trials, fmin
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "RRU"  # Here you can type in the name of the cell you want to use
+cell_name = "GRRUA"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -67,7 +67,7 @@ else:
 # Hyperparameters
 # Data parameters
 # Choose on of "JSB Chorales" | "MuseData" | "Nottingham" | "Piano-midi.de" (which data set to test on)
-data_set_name = "JSB Chorales"
+data_set_name = "Nottingham"
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
 window_size = 200  # If you have a lot of resources you can run this on full context size - 160/3780/1793/3623
 step_size = window_size // 2
@@ -81,9 +81,9 @@ HIDDEN_UNITS = 128 * 3  # This will only be used if the number_of_parameters is 
 number_of_parameters = 1000000  # 1 million learnable parameters
 learning_rate = 0.001
 number_of_layers = 1
-do_hyperparameter_optimization = True
+do_hyperparameter_optimization = False
 middle_layer_size_multiplier = 2
-residual_weight_initial_value = 0.95
+gate_bias = 1
 
 ckpt_path = 'ckpt_music/'
 log_path = 'logdir_music/'
@@ -116,6 +116,9 @@ class MusicModel:
         # Bool value if we are in training or not
         training = tf.placeholder(tf.bool, name='training')
 
+        # Batch size list of sequence multipliers, to get a fair loss
+        sequence_length_matrix = tf.placeholder(tf.float32, [None, window_size], name="sequence_length_matrix")
+
         # Create the RNN cell, corresponding to the one you chose
         cells = []
         for _ in range(number_of_layers):
@@ -123,8 +126,7 @@ class MusicModel:
                 cell = cell_fn(hidden_units,
                                training=training,
                                output_size=output_size,
-                               middle_layer_size_multiplier=middle_layer_size_multiplier,
-                               residual_weight_initial_value=residual_weight_initial_value)
+                               middle_layer_size_multiplier=middle_layer_size_multiplier)
             else:
                 cell = cell_fn(hidden_units)
             cells.append(cell)
@@ -165,8 +167,13 @@ class MusicModel:
         prediction = tf.reshape(prediction, shape=(-1, window_size, vocabulary_size))
 
         # Calculate NLL loss
+        # After the next operation, shape will be [batch_size, window_size, vocabulary_size]
         loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=prediction, labels=y)
+        # After the next operation, shape will be [batch_size, window_size]
         loss = tf.reduce_sum(loss, -1)
+        # We nullify the padding loss and multiply the others, so we get a loss, which only counts in the un-padded data
+        loss = loss * sequence_length_matrix
+        # After the next operation, the shape will be [1]
         loss = tf.reduce_mean(loss)
 
         # Printing trainable variables which have "kernel" in their name
@@ -191,6 +198,7 @@ class MusicModel:
         self.x = x
         self.y = y
         self.training = training
+        self.sequence_length_matrix = sequence_length_matrix
         # Information you can get from this graph
         self.loss = loss
         # To call the optimization step (gradient descent)
@@ -216,7 +224,7 @@ class MusicModel:
             validation_writer = tf.summary.FileWriter(output_path + "/validation")
             validation_writer.add_graph(sess.graph)
 
-            x_train, y_train = split_data_in_parts(train_data, window_size, step_size, vocabulary_size)
+            x_train, y_train, sequence_lengths_train = split_data_in_parts(train_data, window_size, step_size, vocabulary_size)
 
             num_training_batches = len(x_train) // batch_size
 
@@ -238,15 +246,20 @@ class MusicModel:
                     if fixed_batch_size or i != num_training_batches - 1:  # The batch_size is fixed or it's not the last
                         x_batch = x_train[i * batch_size: i * batch_size + batch_size]
                         y_batch = y_train[i * batch_size: i * batch_size + batch_size]
+                        sequence_length = sequence_lengths_train[i * batch_size: i * batch_size + batch_size]
                     else:
                         # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
                         x_batch = x_train[i * batch_size:]
                         y_batch = y_train[i * batch_size:]
+                        sequence_length = sequence_lengths_train[i * batch_size:]
+
+                    sequence_length_matrix = create_sequence_length_matrix(len(sequence_length), sequence_length)
 
                     feed_dict = {
                         self.x: x_batch,
                         self.y: y_batch,
-                        self.training: True
+                        self.training: True,
+                        self.sequence_length_matrix: sequence_length_matrix
                     }
 
                     if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
@@ -277,7 +290,7 @@ class MusicModel:
                 if valid_data is not None:
                     print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
 
-                    x_valid, y_valid = split_data_in_parts(valid_data, window_size, window_size, vocabulary_size)
+                    x_valid, y_valid, sequence_lengths_valid = split_data_in_parts(valid_data, window_size, window_size, vocabulary_size)
 
                     num_validation_batches = len(x_valid) // batch_size
 
@@ -289,15 +302,20 @@ class MusicModel:
                         if fixed_batch_size or i != num_validation_batches - 1:  # The batch_size is fixed or it's not the last
                             x_batch = x_valid[i * batch_size: i * batch_size + batch_size]
                             y_batch = y_valid[i * batch_size: i * batch_size + batch_size]
+                            sequence_length = sequence_lengths_valid[i * batch_size: i * batch_size + batch_size]
                         else:
                             # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
                             x_batch = x_valid[i * batch_size:]
                             y_batch = y_valid[i * batch_size:]
+                            sequence_length = sequence_lengths_valid[i * batch_size:]
+
+                        sequence_length_matrix = create_sequence_length_matrix(len(sequence_length), sequence_length)
 
                         feed_dict = {
                             self.x: x_batch,
                             self.y: y_batch,
-                            self.training: False
+                            self.training: False,
+                            self.sequence_length_matrix: sequence_length_matrix
                         }
 
                         l = sess.run(self.loss, feed_dict=feed_dict)
@@ -358,7 +376,7 @@ class MusicModel:
             testing_writer = tf.summary.FileWriter(output_path + "/testing")
             testing_writer.add_graph(sess.graph)
 
-            x_test, y_test = split_data_in_parts(data, window_size, window_size, vocabulary_size)
+            x_test, y_test, sequence_lengths = split_data_in_parts(data, window_size, window_size, vocabulary_size)
 
             # Restore session
             ckpt = tf.train.get_checkpoint_state(ckpt_path)
@@ -378,15 +396,20 @@ class MusicModel:
                 if fixed_batch_size or i != num_batches - 1:  # The batch_size is fixed or it's not the last
                     x_batch = x_test[i * batch_size: i * batch_size + batch_size]
                     y_batch = y_test[i * batch_size: i * batch_size + batch_size]
+                    sequence_length = sequence_lengths[i * batch_size: i * batch_size + batch_size]
                 else:
                     # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
                     x_batch = x_test[i * batch_size:]
                     y_batch = y_test[i * batch_size:]
+                    sequence_length = sequence_lengths[i * batch_size:]
+
+                sequence_length_matrix = create_sequence_length_matrix(len(sequence_length), sequence_length)
 
                 feed_dict = {
                     self.x: x_batch,
                     self.y: y_batch,
-                    self.training: False
+                    self.training: False,
+                    self.sequence_length_matrix: sequence_length_matrix
                 }
 
                 l = sess.run(self.loss, feed_dict=feed_dict)
@@ -412,6 +435,21 @@ class MusicModel:
             return average_loss
 
 
+def create_sequence_length_matrix(batch_dimension, sequence_lengths):
+    matrix = np.zeros([batch_dimension, window_size])
+
+    for i in range(batch_dimension):
+        sequence_length = sequence_lengths[i]
+
+        multiplier_for_the_non_padded = window_size / sequence_length
+
+        for j in range(sequence_length):
+            matrix[i][j] = multiplier_for_the_non_padded
+        # And for the rest of the sequence leave the zeros
+
+    return matrix
+
+
 if __name__ == '__main__':  # Main function
     TRAINING_DATA, VALIDATION_DATA, TESTING_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
@@ -433,44 +471,35 @@ if __name__ == '__main__':  # Main function
 
         # What to do with hp.uniforms that need to be rounded
         round_uniform = ['num_params', 'out_size']
-        # What to do with reverse hp.loguniform variables
-        reverse_log_uniforms = {
-            'residual_weight': [0.0001, 1]  # It can't be 0
-        }
 
         space = [
             # hp.uniform
             hp.uniform('num_params', 1000000, 10000000),
             hp.uniform('out_size', 32, 256),
             hp.uniform('middle_multiplier', 0.5, 8),
+            hp.uniform('gate_bias_value', -1, 3),
             # hp.loguniform
-            hp.loguniform('lr', np.log(0.0004), np.log(0.004)),
-            # Reverse hp.loguniform
-            hp.loguniform('residual_weight', np.log(0.0001), np.log(1))  # It can't be 0
+            hp.loguniform('lr', np.log(0.0004), np.log(0.004))
         ]
 
 
-        def objective(num_params, out_size, middle_multiplier, lr, residual_weight):
+        def objective(num_params, out_size, middle_multiplier, gate_bias_value, lr):
             # For some values we need extra stuff
             num_params = round(num_params)
             out_size = round(out_size)
-            # Reverse hp.loguniform - swap difference
-            residual_weight = \
-                reverse_log_uniforms['residual_weight'][1] -\
-                (residual_weight - reverse_log_uniforms['residual_weight'][0])
 
             # We'll optimize these parameters
             global learning_rate, number_of_parameters
-            global output_size, middle_layer_size_multiplier, residual_weight_initial_value
+            global output_size, middle_layer_size_multiplier, gate_bias
             learning_rate = lr
             number_of_parameters = num_params
             output_size = out_size
             middle_layer_size_multiplier = middle_multiplier
-            residual_weight_initial_value = residual_weight
+            gate_bias = gate_bias_value
 
             # This might give some clues
             global output_path
-            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/num_params{num_params}out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}residual_weight{residual_weight}"
+            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/num_params{num_params}out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}gate_bias{gate_bias}"
 
             global HIDDEN_UNITS
             global model_function
@@ -501,5 +530,4 @@ if __name__ == '__main__':  # Main function
 
         print_trials_information(hyperopt_trials=tpe_trials,
                                  round_uniform=round_uniform,
-                                 reverse_hyperopt_loguniforms=reverse_log_uniforms,
                                  metric="NLL")

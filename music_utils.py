@@ -1,9 +1,23 @@
+# Importing pickle so we can read and save pickle files
 import pickle
+# Importing numpy so we can use numpy arrays
 import numpy as np
+# Importing os.path so we can check if files and directories exist
+import os.path
 
-supported_data_sets = ["JSB Chorales", "MuseData", "Nottingham", "Piano-midi.de"]
-unchanged_data_path = "data/music/unchanged/"
+downloaded_data_path = "data/music/unchanged/"
 prepared_data_path = "data/music/ready/"
+supported_data_sets = ["JSB Chorales", "MuseData", "Nottingham", "Piano-midi.de"]
+
+
+def check_if_data_sets_are_downloaded():
+    if not os.path.exists(downloaded_data_path):
+        raise FileNotFoundError("The downloaded data path you specified doesn't exist!")
+    for data_set_name in supported_data_sets:
+        if not os.path.exists(downloaded_data_path + data_set_name + ".pickle"):
+            raise FileNotFoundError(f"There is no {data_set_name}.pickle in the downloaded data folder!")
+
+    print("All the supported data sets have been found in your specified folder!")
 
 
 def smallest(a, b):
@@ -24,7 +38,7 @@ def biggest(a, b):
         return b
 
 
-def analyse_data(data_path=unchanged_data_path, mode="full"):
+def analyse_data(data_path=downloaded_data_path, mode="full"):
     assert mode in ["mini", "full"], "Invalid value for variable mode, it must be \"mini\" or \"full\"!"
     print("Starting data analysis...")
 
@@ -104,7 +118,7 @@ def prepare_data(name):
 
     print(f"Preparing {name} data set...")
 
-    with open(f'{unchanged_data_path}{name}.pickle', 'rb') as f:
+    with open(f'{downloaded_data_path}{name}.pickle', 'rb') as f:
         data = pickle.load(f)
         # All 4 music data sets have 3 keys - 'test', 'train', 'valid'
         train = data['train']
@@ -124,7 +138,7 @@ def mask_the_data(data):
     for seq in data:
         middle_sequences = []  # This is 1 "big" sequence
         for seq2 in seq:
-            # Here each seq2 is [1, 2, 3]
+            # Here each seq2 is [1, 2, 3], or (1, 2, 3) for JSB Chorales
 
             if not seq2:  # If this sequence is empty - [] or ()
                 continue
@@ -154,23 +168,22 @@ def binary_mask(numbers, mask_size, delay=0):
 
 
 if __name__ == '__main__':  # Main function
-    # analyse_data(data_path=unchanged_data_path, mode="full")
+    # We check if the data sets are downloaded, and raise an error if they are not
+    check_if_data_sets_are_downloaded()
+
+    # Print out the analysis of the unprepared data
+    analyse_data(data_path=downloaded_data_path, mode="full")
 
     # The data sets are in MIDI note numbers, which are from 21 and 108, both points included
     MIDI_numbers = 108 - 21 + 1  # So 88 different numbers
     MIDI_delay = 21
-    # Do we need a token for padding? Currently we don't have one
-    # All possible MIDI note numbers between 21 and 108 inclusive and a token for padding
-    # vocabulary_size = MIDI_numbers + 1
 
     print("Preparing music data sets...")
 
-    # Data sets from http://www-etud.iro.umontreal.ca/~boulanni/icml2012
-    prepare_data("JSB Chorales")  # [[( : empty-()
-    prepare_data("MuseData")  # [[[ : empty-[]
-    prepare_data("Nottingham")  # [[[ : empty-[]
-    prepare_data("Piano-midi.de")  # [[[ : empty-[]
+    for data_set in supported_data_sets:
+        prepare_data(data_set)
 
+    # Print out the analysis of the prepared data
     analyse_data(data_path=prepared_data_path, mode="full")
 
 
@@ -189,35 +202,29 @@ def load_data(name):
 def split_data_in_parts(data, window_size, step_size, time_step_feature_count, min_length=1):
     sequences = []
     targets = []
+    sequence_lengths = []
+
+    # This will bet the padding in case if a sample is shorter than window_size
     time_step_zeros = np.zeros(time_step_feature_count)
+
     for sequence in data:
         sequence_length = len(sequence)
-        if sequence_length <= window_size + 1:  # If we can get only 1 training sample out of this sequence
-            # We add the sequence only if it's larger than the stated minimum. We do this, because some people might
-            # not want 1 real sample and 199 padded zero sample.
-            if sequence_length >= min_length:
-                new_sequence = sequence[0:sequence_length - 1]
-                new_target = sequence[1:sequence_length]
-                for i in range(window_size - len(new_sequence)):
-                    new_sequence.append(time_step_zeros)
-                    new_target.append(time_step_zeros)
-                sequences.append(new_sequence)
-                targets.append(new_target)
-        else:
-            last_index = 0
-            for i in range(0, sequence_length - window_size, step_size):
-                sequences.append(sequence[i:i + window_size])
-                targets.append(sequence[i + 1:i + window_size + 1])
-                last_index = i + step_size
-            # We must pad the remaining length, if it has some left.
-            remaining_data = sequence[last_index:]
-            remaining_length = len(remaining_data)
-            if remaining_length >= min_length:
-                new_sequence = remaining_data[0:remaining_length - 1]
-                new_target = remaining_data[1:remaining_length]
-                for i in range(window_size - len(new_sequence)):
-                    new_sequence.append(time_step_zeros)
-                    new_target.append(time_step_zeros)
-                sequences.append(new_sequence)
-                targets.append(new_target)
-    return sequences, targets
+        last_index = 0
+        for i in range(0, sequence_length - window_size, step_size):
+            sequences.append(sequence[i:i + window_size])
+            targets.append(sequence[i + 1:i + window_size + 1])
+            sequence_lengths.append(window_size)
+            last_index = i + step_size
+        # We must pad the remaining length, if it has some left.
+        remaining_data = sequence[last_index:]
+        remaining_length = len(remaining_data)
+        if remaining_length >= min_length:
+            new_sequence = remaining_data[0:remaining_length - 1]
+            new_target = remaining_data[1:remaining_length]
+            for i in range(window_size - len(new_sequence)):
+                new_sequence.append(time_step_zeros)
+                new_target.append(time_step_zeros)
+            sequences.append(new_sequence)
+            targets.append(new_target)
+            sequence_lengths.append(remaining_length)
+    return sequences, targets, sequence_lengths
