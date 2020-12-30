@@ -12,6 +12,8 @@ from music_utils import split_data_in_parts
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
+from utils import get_batch
+
 from RAdam import RAdamOptimizer
 # Importing the necessary stuff for hyperparameter optimization
 from hyperopt import hp, tpe, Trials, fmin
@@ -27,7 +29,7 @@ from hyperopt import hp, tpe, Trials, fmin
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "GRRUA"  # Here you can type in the name of the cell you want to use
+cell_name = "RRU"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -67,7 +69,7 @@ else:
 # Hyperparameters
 # Data parameters
 # Choose on of "JSB Chorales" | "MuseData" | "Nottingham" | "Piano-midi.de" (which data set to test on)
-data_set_name = "Nottingham"
+data_set_name = "JSB Chorales"
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
 window_size = 200  # If you have a lot of resources you can run this on full context size - 160/3780/1793/3623
 step_size = window_size // 2
@@ -78,12 +80,13 @@ shuffle_data = True  # Should we shuffle the samples?
 num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 break_epochs_no_gain = 7  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
 HIDDEN_UNITS = 128 * 3  # This will only be used if the number_of_parameters is None or < 1
-number_of_parameters = 1000000  # 1 million learnable parameters
+number_of_parameters = 5000000  # 1 million learnable parameters
 learning_rate = 0.001
 number_of_layers = 1
 do_hyperparameter_optimization = False
 middle_layer_size_multiplier = 2
-gate_bias = 1
+# gate_bias = 1
+dropout_rate = 0.5
 
 ckpt_path = 'ckpt_music/'
 log_path = 'logdir_music/'
@@ -126,6 +129,8 @@ class MusicModel:
                 cell = cell_fn(hidden_units,
                                training=training,
                                output_size=output_size,
+                               # gate_bias=gate_bias,
+                               dropout_rate=dropout_rate,
                                middle_layer_size_multiplier=middle_layer_size_multiplier)
             else:
                 cell = cell_fn(hidden_units)
@@ -236,24 +241,20 @@ class MusicModel:
                 print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
 
                 if shuffle_data:
-                    x_train, y_train = shuffle(x_train, y_train)  # Check if it this shuffles correctly maybe
+                    x_train, y_train, sequence_lengths_train = shuffle(x_train, y_train, sequence_lengths_train)  # Check if it this shuffles correctly maybe
 
                 total_training_loss = 0
 
                 start_time = time.time()
 
                 for i in range(num_training_batches):
-                    if fixed_batch_size or i != num_training_batches - 1:  # The batch_size is fixed or it's not the last
-                        x_batch = x_train[i * batch_size: i * batch_size + batch_size]
-                        y_batch = y_train[i * batch_size: i * batch_size + batch_size]
-                        sequence_length = sequence_lengths_train[i * batch_size: i * batch_size + batch_size]
-                    else:
-                        # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
-                        x_batch = x_train[i * batch_size:]
-                        y_batch = y_train[i * batch_size:]
-                        sequence_length = sequence_lengths_train[i * batch_size:]
+                    x_batch = get_batch(x_train, i, num_training_batches, batch_size, fixed_batch_size)
+                    y_batch = get_batch(y_train, i, num_training_batches, batch_size, fixed_batch_size)
+                    sequence_length_batch = get_batch(sequence_lengths_train, i, num_training_batches, batch_size,
+                                                      fixed_batch_size)
 
-                    sequence_length_matrix = create_sequence_length_matrix(len(sequence_length), sequence_length)
+                    sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
+                                                                           sequence_length_batch)
 
                     feed_dict = {
                         self.x: x_batch,
@@ -299,17 +300,13 @@ class MusicModel:
                     start_time = time.time()
 
                     for i in range(num_validation_batches):
-                        if fixed_batch_size or i != num_validation_batches - 1:  # The batch_size is fixed or it's not the last
-                            x_batch = x_valid[i * batch_size: i * batch_size + batch_size]
-                            y_batch = y_valid[i * batch_size: i * batch_size + batch_size]
-                            sequence_length = sequence_lengths_valid[i * batch_size: i * batch_size + batch_size]
-                        else:
-                            # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
-                            x_batch = x_valid[i * batch_size:]
-                            y_batch = y_valid[i * batch_size:]
-                            sequence_length = sequence_lengths_valid[i * batch_size:]
+                        x_batch = get_batch(x_valid, i, num_validation_batches, batch_size, fixed_batch_size)
+                        y_batch = get_batch(y_valid, i, num_validation_batches, batch_size, fixed_batch_size)
+                        sequence_length_batch = get_batch(sequence_lengths_valid, i, num_validation_batches, batch_size,
+                                                          fixed_batch_size)
 
-                        sequence_length_matrix = create_sequence_length_matrix(len(sequence_length), sequence_length)
+                        sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
+                                                                               sequence_length_batch)
 
                         feed_dict = {
                             self.x: x_batch,
@@ -392,18 +389,12 @@ class MusicModel:
             start_time = time.time()
 
             for i in range(num_batches):
+                x_batch = get_batch(x_test, i, num_batches, batch_size, fixed_batch_size)
+                y_batch = get_batch(y_test, i, num_batches, batch_size, fixed_batch_size)
+                sequence_length_batch = get_batch(sequence_lengths, i, num_batches, batch_size, fixed_batch_size)
 
-                if fixed_batch_size or i != num_batches - 1:  # The batch_size is fixed or it's not the last
-                    x_batch = x_test[i * batch_size: i * batch_size + batch_size]
-                    y_batch = y_test[i * batch_size: i * batch_size + batch_size]
-                    sequence_length = sequence_lengths[i * batch_size: i * batch_size + batch_size]
-                else:
-                    # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
-                    x_batch = x_test[i * batch_size:]
-                    y_batch = y_test[i * batch_size:]
-                    sequence_length = sequence_lengths[i * batch_size:]
-
-                sequence_length_matrix = create_sequence_length_matrix(len(sequence_length), sequence_length)
+                sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
+                                                                       sequence_length_batch)
 
                 feed_dict = {
                     self.x: x_batch,
@@ -474,32 +465,33 @@ if __name__ == '__main__':  # Main function
 
         space = [
             # hp.uniform
-            hp.uniform('num_params', 1000000, 10000000),
+            hp.uniform('num_params', 1000000, 15000000),
             hp.uniform('out_size', 32, 256),
             hp.uniform('middle_multiplier', 0.5, 8),
-            hp.uniform('gate_bias_value', -1, 3),
+            hp.uniform('drop_rate', 0.0, 0.9),
+            # hp.uniform('gate_bias_value', -1, 3),
             # hp.loguniform
             hp.loguniform('lr', np.log(0.0004), np.log(0.004))
         ]
 
-
-        def objective(num_params, out_size, middle_multiplier, gate_bias_value, lr):
+        def objective(num_params, out_size, middle_multiplier, drop_rate, gate_bias_value, lr):
             # For some values we need extra stuff
             num_params = round(num_params)
             out_size = round(out_size)
 
             # We'll optimize these parameters
             global learning_rate, number_of_parameters
-            global output_size, middle_layer_size_multiplier, gate_bias
+            global output_size, middle_layer_size_multiplier, dropout_rate  # gate_bias
             learning_rate = lr
             number_of_parameters = num_params
             output_size = out_size
             middle_layer_size_multiplier = middle_multiplier
-            gate_bias = gate_bias_value
+            dropout_rate = drop_rate
+            # gate_bias = gate_bias_value
 
             # This might give some clues
             global output_path
-            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/num_params{num_params}out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}gate_bias{gate_bias}"
+            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/num_params{num_params}out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}dropout{drop_rate}"  # gate_bias{gate_bias}
 
             global HIDDEN_UNITS
             global model_function

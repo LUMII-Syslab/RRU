@@ -16,7 +16,6 @@ def find_optimal_hidden_units(hidden_units,
                               number_of_parameters,
                               model_function,
                               ensure_divisibility_with_some_powers_of_two=False):
-    # Inspired from https://github.com/deepmind/lamb/blob/master/lamb/lamb_flags.py
     # They made a version that takes in a config file, which might be more useful to some people
     print(f"Searching for the largest possible hidden unit count"
           f",  which has <= {number_of_parameters} trainable parameters!")
@@ -97,10 +96,6 @@ def find_optimal_hidden_units(hidden_units,
     return chosen_hidden_size
 
 
-def gelu(x):
-    return x * tf.sigmoid(1.702 * x)
-
-
 # Printing some information in similar style for all the experiments
 def print_trainable_variables():
     variables_total = get_total_variables()
@@ -147,3 +142,24 @@ def print_trials_information(hyperopt_trials, hyperopt_choices=None, reverse_hyp
     best_trial = hyperopt_trials.best_trial
     print(f"\nBest Trial")
     print_trial_information(best_trial)
+
+
+def get_batch(data, current_batch_index, number_of_batches, batch_size, fixed_batch_size=True,
+              continuous_batches=False):
+    if continuous_batches:
+        batch = []
+        if fixed_batch_size:
+            for j in range(current_batch_index, number_of_batches * batch_size, number_of_batches):
+                batch.append(data[j])
+        else:
+            for j in range(current_batch_index, len(data), number_of_batches):
+                batch.append(data[j])
+    else:
+        # The batch_size is fixed or it's not the last
+        if fixed_batch_size or current_batch_index != number_of_batches - 1:
+            batch = data[current_batch_index * batch_size: current_batch_index * batch_size + batch_size]
+        else:
+            # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
+            batch = data[current_batch_index * batch_size:]
+
+    return batch

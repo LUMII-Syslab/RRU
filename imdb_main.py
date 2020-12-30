@@ -14,6 +14,7 @@ from imdb_utils import get_sequence_lengths
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
+from utils import get_batch
 # Importing the necessary stuff for hyperparameter optimization
 from hyperopt import hp, tpe, Trials, fmin
 
@@ -227,11 +228,8 @@ class IMDBModel:
 
             for epoch in range(num_epochs):
                 print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
-                if epoch > 0:  # If it's not the first epoch, we shuffle the data
-                    data = list(zip(x_train, y_train))
-                    if shuffle_data:
-                        shuffle(data)
-                    x_train, y_train = zip(*data)
+                if shuffle_data:
+                    x_train, y_train = shuffle(x_train, y_train)
 
                 num_batches = len(x_train) // batch_size
 
@@ -241,12 +239,9 @@ class IMDBModel:
                 start_time = time.time()
 
                 for i in range(num_batches):
-                    if fixed_batch_size or i != num_batches - 1:
-                        x_batch = x_train[i * batch_size: i * batch_size + batch_size]
-                        y_batch = y_train[i * batch_size: i * batch_size + batch_size]
-                    else:
-                        x_batch = x_train[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
-                        y_batch = y_train[i * batch_size:]
+                    x_batch = get_batch(x_train, i, num_batches, batch_size, fixed_batch_size)
+                    y_batch = get_batch(y_train, i, num_batches, batch_size, fixed_batch_size)
+
                     sequence_lengths = get_sequence_lengths(x_batch)
 
                     feed_dict = {
@@ -320,12 +315,9 @@ class IMDBModel:
             start_time = time.time()
 
             for i in range(num_batches):
-                if fixed_batch_size or i != num_batches - 1:
-                    x_batch = x_test[i * batch_size: i * batch_size + batch_size]
-                    y_batch = y_test[i * batch_size: i * batch_size + batch_size]
-                else:
-                    x_batch = x_test[i * batch_size:]  # Run the remaining sequences (that aren't full batch_size)
-                    y_batch = y_test[i * batch_size:]
+                x_batch = get_batch(x_test, i, num_batches, batch_size, fixed_batch_size)
+                y_batch = get_batch(y_test, i, num_batches, batch_size, fixed_batch_size)
+
                 sequence_lengths = get_sequence_lengths(x_batch)
 
                 l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch,

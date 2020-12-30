@@ -6,13 +6,12 @@ from datetime import datetime  # We'll use this to dynamically generate training
 from sklearn.utils import shuffle  # We'll use this to shuffle training data
 
 # Importing some functions that will help us deal with the input data
-from lm_utils import load_data
-from lm_utils import get_window_indexes
-from lm_utils import get_input_data_from_indexes
+from lm_utils import load_data, get_window_indexes, get_input_data_from_indexes, get_zeros_state
 
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
+from utils import get_batch
 # Importing the necessary stuff for hyperparameter optimization
 from hyperopt import hp, tpe, Trials, fmin
 
@@ -28,7 +27,7 @@ from adam_decay import AdamOptimizer_decay
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "GRRUA"  # Here you can type in the name of the cell you want to use
+cell_name = "RRU"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
@@ -70,7 +69,7 @@ else:
 
 # Hyperparameters
 # Data parameters
-data_set_name = "penn"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
+data_set_name = "pennchar"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
 character_level = True
 if data_set_name in ["penn"]:
     character_level = False
@@ -82,9 +81,9 @@ assert window_size == 1 or window_size % 2 == 0, "Variable window_size must be 1
 batch_size = 64  # Max batch_sizes (on 512 half-sequences): ptb word 137; ptb char 761; enwik8 & text8 = 9765
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 # We do character-level True, word-level False
-continuous_batches = False  # Batches go continuously, this might give performance boost with a stateful RNN cell
+continuous_batches = True  # Batches go continuously, this might give performance boost with a stateful RNN cell
 # We do character-level False, word-level True
-shuffle_data = True  # Should we shuffle the samples?
+shuffle_data = False  # Should we shuffle the samples?
 # Training
 num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 # If validation perplexity doesn't get lower, after how many epochs we should break (-1 -> disabled)
@@ -96,7 +95,7 @@ embedding_size = 64  # PTB character-level 16, PTB word-level 64, what for other
 learning_rate = 0.003  # Each cell needs different - 0,001 LSTM and GRU explodes a bit, Mogrifier can't learn at low
 number_of_layers = 2
 # We do character-level True, word-level False
-stateful = False  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
+stateful = True  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
 zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
 outer_dropout = 0  # 0, if you do not want outer dropout
 L2_decay = 0.0
@@ -336,30 +335,11 @@ class LMModel:
                 state = None
 
                 for i in range(num_training_batches):
-                    if continuous_batches:
-                        x_batch = []
-                        if fixed_batch_size:
-                            for j in range(i, num_training_batches * batch_size, num_training_batches):
-                                x_batch.append(training_indexes[j])
-                        else:
-                            for j in range(i, len(training_indexes), num_training_batches):
-                                x_batch.append(training_indexes[j])
-                    else:
-                        # The batch_size is fixed or it's not the last
-                        if fixed_batch_size or i != num_training_batches - 1:
-                            x_batch = training_indexes[i * batch_size: i * batch_size + batch_size]
-                        else:
-                            # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
-                            x_batch = training_indexes[i * batch_size:]
+                    x_batch = get_batch(training_indexes, i, num_training_batches, batch_size, fixed_batch_size,
+                                        continuous_batches)
 
                     if stateful and (np.random.uniform() < zero_state_chance or i == 0):
-                        # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
-                        zero_state = np.zeros((len(x_batch), self.hidden_units))
-                        if state_is_tuple:
-                            zero_state = [zero_state, zero_state]
-                        state = []
-                        for j in range(number_of_layers):
-                            state.append(zero_state)
+                        state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
 
                     # Now we have batch of integers to look in text from
                     x_batch, y_batch = get_input_data_from_indexes(training_data, x_batch, window_size)
@@ -450,30 +430,11 @@ class LMModel:
                     start_time = time.time()
 
                     for i in range(num_validation_batches):
-                        if continuous_batches:
-                            x_batch = []
-                            if fixed_batch_size:
-                                for j in range(i, num_validation_batches * batch_size, num_validation_batches):
-                                    x_batch.append(validation_indexes[j])
-                            else:
-                                for j in range(i, len(validation_indexes), num_validation_batches):
-                                    x_batch.append(validation_indexes[j])
-                        else:
-                            # If the batch size is fixed or it's not the last batch, we use batch size
-                            if fixed_batch_size or i != num_validation_batches - 1:
-                                x_batch = validation_indexes[i * batch_size: i * batch_size + batch_size]
-                            else:
-                                # Run the remaining sequences (that might be larger than batch size)
-                                x_batch = validation_indexes[i * batch_size:]
+                        x_batch = get_batch(validation_indexes, i, num_validation_batches, batch_size, fixed_batch_size,
+                                            continuous_batches)
 
                         if stateful:
-                            # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
-                            zero_state = np.zeros((len(x_batch), self.hidden_units))
-                            if state_is_tuple:
-                                zero_state = [zero_state, zero_state]
-                            state = []
-                            for j in range(number_of_layers):
-                                state.append(zero_state)
+                            state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
 
                         # Now we have batch of integers to look in text from
                         x_batch, y_batch = get_input_data_from_indexes(validation_data, x_batch, window_size)
@@ -583,29 +544,10 @@ class LMModel:
             start_time = time.time()
 
             for i in range(num_batches):
-                if continuous_batches:
-                    x_batch = []
-                    if fixed_batch_size:
-                        for j in range(i, num_batches * batch_size, num_batches):
-                            x_batch.append(indexes[j])
-                    else:
-                        for j in range(i, len(indexes), num_batches):
-                            x_batch.append(indexes[j])
-                else:
-                    if fixed_batch_size or i != num_batches - 1:  # The batch_size is fixed or it's not the last
-                        x_batch = indexes[i * batch_size: i * batch_size + batch_size]
-                    else:
-                        # Run the remaining sequences (that might not be exactly batch_size (they might be larger))
-                        x_batch = indexes[i * batch_size:]
+                x_batch = get_batch(indexes, i, num_batches, batch_size, fixed_batch_size, continuous_batches)
 
                 if stateful:
-                    # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
-                    zero_state = np.zeros((len(x_batch), self.hidden_units))
-                    if state_is_tuple:
-                        zero_state = [zero_state, zero_state]
-                    state = []
-                    for j in range(number_of_layers):
-                        state.append(zero_state)
+                    state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
 
                 # Now we have batch of integers to look in text from
                 x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
@@ -690,9 +632,9 @@ if __name__ == '__main__':  # Main function
         times_to_evaluate = 100
 
         # hp.choice
-        batch_choice = [16, 32, 64, 128]
+        batch_choice = [32, 64, 128]
         num_layers_choice = [1, 2, 3]
-        z_trans_choice = [1, 2, 3]
+        z_trans_choice = [1, 2]
         # We need this, so we can print the hp.choice answers normally
         choices = {
             'batch': batch_choice,
@@ -702,10 +644,6 @@ if __name__ == '__main__':  # Main function
 
         # What to do with hp.uniforms that need to be rounded
         round_uniform = ['num_params', 'out_size']
-        # What to do with reverse hp.loguniform variables
-        reverse_log_uniforms = {
-            'residual_weight': [0.0001, 1]  # It can't be 0
-        }
 
         space = [
             # hp.choice
@@ -713,28 +651,22 @@ if __name__ == '__main__':  # Main function
             hp.choice('num_layers', num_layers_choice),
             hp.choice('z_trans', z_trans_choice),
             # hp.uniform
-            hp.uniform('num_params', 10000000, 30000000),
-            hp.uniform('out_size', 32, 256),
+            hp.uniform('num_params', 12000000, 28000000),
+            hp.uniform('out_size', 128, 256),
             hp.uniform('middle_multiplier', 0.1, 8),
             # hp.loguniform
-            hp.loguniform('lr', np.log(0.0004), np.log(0.004)),
-            # Reverse hp.loguniform
-            hp.loguniform('residual_weight', np.log(0.0001), np.log(1))  # It can't be 0
+            hp.loguniform('lr', np.log(0.0001), np.log(0.009)),
         ]
 
 
-        def objective(batch, num_layers, z_trans, num_params, out_size, middle_multiplier, lr, residual_weight):
+        def objective(batch, num_layers, z_trans, num_params, out_size, middle_multiplier, lr):
             # For some values we need extra stuff
             num_params = round(num_params)
             out_size = round(out_size)
-            # Reverse hp.loguniform - swap difference
-            residual_weight = \
-                reverse_log_uniforms['residual_weight'][1] - \
-                (residual_weight - reverse_log_uniforms['residual_weight'][0])
 
             # We'll optimize these parameters
             global batch_size, number_of_layers, number_of_parameters, learning_rate
-            global z_transformations, output_size, middle_layer_size_multiplier, residual_weight_initial_value
+            global z_transformations, output_size, middle_layer_size_multiplier
             batch_size = batch
             number_of_layers = num_layers
             z_transformations = z_trans
@@ -742,14 +674,13 @@ if __name__ == '__main__':  # Main function
             output_size = out_size
             middle_layer_size_multiplier = middle_multiplier
             learning_rate = lr
-            residual_weight_initial_value = residual_weight
+
 
             # This might give some clues
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
                           f"/batch{batch}num_layers{num_layers}z_trans{z_trans}num_params{num_params}" \
-                          f"out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}" \
-                          f"residual_weight{residual_weight}"
+                          f"out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}"
 
             global HIDDEN_UNITS
             global model_function
@@ -780,5 +711,4 @@ if __name__ == '__main__':  # Main function
         print_trials_information(tpe_trials,
                                  hyperopt_choices=choices,
                                  round_uniform=round_uniform,
-                                 reverse_hyperopt_loguniforms=reverse_log_uniforms,
                                  metric="Perplexity")

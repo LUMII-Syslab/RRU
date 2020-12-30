@@ -12,17 +12,8 @@ PADDING = "C_PAD"
 UNKNOWN = "C_UNK"
 
 
-def prepare_enwik8(vocabulary_size):
-    print("  Preparing enwik8...")
-    prepare_enwik8_or_text8(name="enwik8", vocabulary_size=vocabulary_size)
-
-
-def prepare_text8(vocabulary_size):
-    print("  Preparing text8...")
-    prepare_enwik8_or_text8(name="text8", vocabulary_size=vocabulary_size)
-
-
 def prepare_enwik8_or_text8(name, vocabulary_size):
+    print(f"  Preparing {name}...")
     # Read data set to a variable
     if name == "enwik8":
         data = zipfile.ZipFile(f"{unchanged_data_path}enwik8.zip").read(name)
@@ -190,11 +181,22 @@ def get_input_data_from_indexes(data, indexes, window_size):
 
 if __name__ == '__main__':  # Main function
     print("Preparing character-level data sets...")
-    prepare_enwik8(vocabulary_size=207)
-    prepare_text8(vocabulary_size=29)
+    prepare_enwik8_or_text8(name="enwik8", vocabulary_size=207)
+    prepare_enwik8_or_text8(name="text8", vocabulary_size=29)
     prepare_pennchar(vocabulary_size=51)
     print("Preparing word-level data sets...")
     prepare_penn(vocabulary_size=9650)
 
     # To load a specific data set use:
     TRAIN_DATA, VALID_DATA, TEST_DATA, VOCABULARY_SIZE = load_data("enwik8")
+
+
+def get_zeros_state(number_of_layers, batch_size, hidden_units, state_is_tuple=False):
+    # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
+    zero_state = np.zeros((batch_size, hidden_units))
+    if state_is_tuple:
+        zero_state = [zero_state, zero_state]
+    state = []
+    for j in range(number_of_layers):
+        state.append(zero_state)
+    return state
