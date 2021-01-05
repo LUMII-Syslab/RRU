@@ -216,10 +216,9 @@ class MusicModel:
                 start_time = time.time()
 
                 for i in range(num_training_batches):
-                    x_batch = get_batch(x_train, i, num_training_batches, batch_size, fixed_batch_size)
-                    y_batch = get_batch(y_train, i, num_training_batches, batch_size, fixed_batch_size)
-                    sequence_length_batch = get_batch(sequence_lengths_train, i, num_training_batches, batch_size,
-                                                      fixed_batch_size)
+                    x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
+                    y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
+                    sequence_length_batch = get_batch(sequence_lengths_train, i, batch_size, fixed_batch_size)
 
                     sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
                                                                            sequence_length_batch)
@@ -268,10 +267,9 @@ class MusicModel:
                     start_time = time.time()
 
                     for i in range(num_validation_batches):
-                        x_batch = get_batch(x_valid, i, num_validation_batches, batch_size, fixed_batch_size)
-                        y_batch = get_batch(y_valid, i, num_validation_batches, batch_size, fixed_batch_size)
-                        sequence_length_batch = get_batch(sequence_lengths_valid, i, num_validation_batches, batch_size,
-                                                          fixed_batch_size)
+                        x_batch = get_batch(x_valid, i, batch_size, fixed_batch_size)
+                        y_batch = get_batch(y_valid, i, batch_size, fixed_batch_size)
+                        sequence_length_batch = get_batch(sequence_lengths_valid, i, batch_size, fixed_batch_size)
 
                         sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
                                                                                sequence_length_batch)
@@ -357,9 +355,9 @@ class MusicModel:
             start_time = time.time()
 
             for i in range(num_batches):
-                x_batch = get_batch(x_test, i, num_batches, batch_size, fixed_batch_size)
-                y_batch = get_batch(y_test, i, num_batches, batch_size, fixed_batch_size)
-                sequence_length_batch = get_batch(sequence_lengths, i, num_batches, batch_size, fixed_batch_size)
+                x_batch = get_batch(x_test, i, batch_size, fixed_batch_size)
+                y_batch = get_batch(y_test, i, batch_size, fixed_batch_size)
+                sequence_length_batch = get_batch(sequence_lengths, i, batch_size, fixed_batch_size)
 
                 sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
                                                                        sequence_length_batch)

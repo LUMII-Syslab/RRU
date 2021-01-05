@@ -144,8 +144,9 @@ def print_trials_information(hyperopt_trials, hyperopt_choices=None, reverse_hyp
     print_trial_information(best_trial)
 
 
-def get_batch(data, current_batch_index, number_of_batches, batch_size, fixed_batch_size=True,
-              continuous_batches=False):
+def get_batch(data, current_batch_index, batch_size, fixed_batch_size=True, continuous_batches=False):
+    number_of_batches = len(data) // batch_size
+
     if continuous_batches:
         batch = []
         if fixed_batch_size:

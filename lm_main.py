@@ -302,8 +302,7 @@ class LMModel:
                 state = None
 
                 for i in range(num_training_batches):
-                    x_batch = get_batch(training_indexes, i, num_training_batches, batch_size, fixed_batch_size,
-                                        continuous_batches)
+                    x_batch = get_batch(training_indexes, i, batch_size, fixed_batch_size, continuous_batches)
 
                     if stateful and (np.random.uniform() < zero_state_chance or i == 0):
                         state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
@@ -397,8 +396,7 @@ class LMModel:
                     start_time = time.time()
 
                     for i in range(num_validation_batches):
-                        x_batch = get_batch(validation_indexes, i, num_validation_batches, batch_size, fixed_batch_size,
-                                            continuous_batches)
+                        x_batch = get_batch(validation_indexes, i, batch_size, fixed_batch_size, continuous_batches)
 
                         if stateful:
                             state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
@@ -511,7 +509,7 @@ class LMModel:
             start_time = time.time()
 
             for i in range(num_batches):
-                x_batch = get_batch(indexes, i, num_batches, batch_size, fixed_batch_size, continuous_batches)
+                x_batch = get_batch(indexes, i, batch_size, fixed_batch_size, continuous_batches)
 
                 if stateful:
                     state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
