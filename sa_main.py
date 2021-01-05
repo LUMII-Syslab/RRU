@@ -7,14 +7,10 @@ import argparse
 from sklearn.utils import shuffle
 
 # Importing functions to load the data in the correct format
-from sa_utils import load_data
-
-from sa_utils import get_sequence_lengths
+from sa_utils import load_data, get_sequence_lengths
 
 # Importing some utility functions that will help us with certain tasks
-from utils import find_optimal_hidden_units
-from utils import print_trainable_variables
-from utils import get_batch
+from utils import find_optimal_hidden_units, print_trainable_variables, get_batch
 
 from cell_registry import get_cell_information
 
