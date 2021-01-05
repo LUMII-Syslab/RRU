@@ -69,7 +69,7 @@ else:
 
 # Hyperparameters
 # Data parameters
-data_set_name = "pennchar"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
+data_set_name = "penn"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
 character_level = True
 if data_set_name in ["penn"]:
     character_level = False
@@ -81,9 +81,9 @@ assert window_size == 1 or window_size % 2 == 0, "Variable window_size must be 1
 batch_size = 64  # Max batch_sizes (on 512 half-sequences): ptb word 137; ptb char 761; enwik8 & text8 = 9765
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 # We do character-level True, word-level False
-continuous_batches = True  # Batches go continuously, this might give performance boost with a stateful RNN cell
+continuous_batches = False  # Batches go continuously, this might give performance boost with a stateful RNN cell
 # We do character-level False, word-level True
-shuffle_data = False  # Should we shuffle the samples?
+shuffle_data = True  # Should we shuffle the samples?
 # Training
 num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 # If validation perplexity doesn't get lower, after how many epochs we should break (-1 -> disabled)
@@ -95,14 +95,15 @@ embedding_size = 64  # PTB character-level 16, PTB word-level 64, what for other
 learning_rate = 0.003  # Each cell needs different - 0,001 LSTM and GRU explodes a bit, Mogrifier can't learn at low
 number_of_layers = 2
 # We do character-level True, word-level False
-stateful = True  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
+stateful = False  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
 zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
 outer_dropout = 0  # 0, if you do not want outer dropout
 L2_decay = 0.0
 do_hyperparameter_optimization = False
 z_transformations = 1
 middle_layer_size_multiplier = 2
-gradient_clipper_on = False
+clip_gradients = True
+clip_multiplier = 10.  # This value matters only if clip_gradients = True
 
 ckpt_path = 'ckpt_lm/'
 log_path = 'logdir_lm/'
@@ -245,15 +246,14 @@ class LMModel:
 
         # Declare our optimizer, we have to check which one works better.
         # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
-        if gradient_clipper_on:
-            optimizer = RAdamOptimizer(learning_rate=learning_rate,
-                                       L2_decay=0.0,
-                                       decay_vars=decay_vars,
-                                       clip_gradients=True, clip_multiplier=10.).minimize(loss)
-        else:
+        optimizer = RAdamOptimizer(learning_rate=learning_rate,
+                                   L2_decay=L2_decay,
+                                   decay_vars=decay_vars,
+                                   clip_gradients=clip_gradients, clip_multiplier=clip_multiplier).minimize(loss)
+        '''
             optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
                                             L2_decay=L2_decay,
-                                            decay_vars=decay_vars).minimize(loss)
+                                            decay_vars=decay_vars).minimize(loss)'''
         # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
