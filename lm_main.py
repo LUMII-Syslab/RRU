@@ -30,18 +30,18 @@ from adam_decay import AdamOptimizer_decay
 cell_name = "RRU"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
-output_size = None  # Most cells don't have an output size, so we by default set it as None
+has_separate_output_size = None  # Most cells don't have an output size, so we by default set it as None
 state_is_tuple = False  # So we can make the RNN cell stateful even for LSTM based cells such as LSTM and MogrifierLSTM
 if cell_name == "RRU":  # ReZero version
     from cells.RRUCell import RRUCell
     cell_fn = RRUCell
-    output_size = 256
+    has_separate_output_size = True
     model_name = 'rru_model'
 
 elif cell_name == "GRRUA":  # Gated version with separate output size
     from cells.GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
-    output_size = 256
+    has_separate_output_size = True
     model_name = "grrua_model"  # We have hopes for this one
 
 elif cell_name == "GRU":
@@ -603,6 +603,8 @@ class LMModel:
 
 
 if __name__ == '__main__':  # Main function
+    output_size = 256 if has_separate_output_size else None
+
     TRAINING_DATA, VALIDATION_DATA, TESTING_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
     # To see how it trains in small amounts (If it's usually in a 90%/5%/5% split, now it's in a 1%/1%/1% split)

@@ -33,18 +33,18 @@ from adam_decay import AdamOptimizer_decay
 cell_name = "RRU"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
-output_size = None  # Most cells don't have an output size, so we by default set it as None
+has_separate_output_size = None  # Most cells don't have an output size, so we by default set it as None
 state_is_tuple = False  # We use variable length dynamic_rnn, so we need to know this if we want to use the code we have
 if cell_name == "RRU":  # ReZero version
     from cells.RRUCell import RRUCell
     cell_fn = RRUCell
-    output_size = 256
+    has_separate_output_size = True
     model_name = 'rru_model'
 
 elif cell_name == "GRRUA":  # Gated version with separate output size
     from cells.GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
-    output_size = 256
+    has_separate_output_size = True
     model_name = "grrua_model"  # We have hopes for this one
 
 elif cell_name == "GRU":
@@ -363,6 +363,8 @@ def parse_args():  # Parse arguments. Currently not used, we will need to write 
 
 if __name__ == '__main__':  # Main function
     # ARGS = parse_args()  # We'll use this when we implement parse_args again
+
+    output_size = 256 if has_separate_output_size else None
 
     # Load the IMDB data set
     X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, max_sequence_length = load_data(vocabulary_size, max_sequence_length)
