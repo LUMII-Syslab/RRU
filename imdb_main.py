@@ -66,6 +66,9 @@ assert print_after_this_many_steps >= 0, "Invalid value for variable print_after
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
 output_path = log_path + model_name + '/' + current_time
 
+# Don't print TensorFlow messages, that we don't need
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
 
 class IMDBModel:
 
