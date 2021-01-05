@@ -7,9 +7,9 @@ import argparse
 from sklearn.utils import shuffle
 
 # Importing functions to load the data in the correct format
-from imdb_utils import load_data
+from sa_utils import load_data
 
-from imdb_utils import get_sequence_lengths
+from sa_utils import get_sequence_lengths
 
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units
