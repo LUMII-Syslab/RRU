@@ -33,18 +33,15 @@ cell_name = "RRU"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
-has_training_bool = False
 if cell_name == "RRU":  # ReZero version
     from cells.RRUCell import RRUCell
     cell_fn = RRUCell
     output_size = 256
-    has_training_bool = True
     model_name = 'rru_model'
 
 elif cell_name == "GRRUA":  # Gated version with separate output size
     from cells.GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
-    has_training_bool = True
     output_size = 256
     model_name = "grrua_model"  # We have hopes for this one
 
@@ -95,7 +92,7 @@ log_path = 'logdir_music/'
 log_after_this_many_steps = 0
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 10
+print_after_this_many_steps = 1
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -125,7 +122,7 @@ class MusicModel:
         # Create the RNN cell, corresponding to the one you chose
         cells = []
         for _ in range(number_of_layers):
-            if has_training_bool:
+            if cell_name in ["RRU", "GRRUA"]:
                 cell = cell_fn(hidden_units,
                                training=training,
                                output_size=output_size,

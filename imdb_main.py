@@ -30,23 +30,20 @@ from adam_decay import AdamOptimizer_decay
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
 # Choose your cell
-cell_name = "GRRUA"  # Here you can type in the name of the cell you want to use
+cell_name = "RRU"  # Here you can type in the name of the cell you want to use
 
 # Maybe we can put these in a separate file called cells.py or something, and import it
 output_size = None  # Most cells don't have an output size, so we by default set it as None
 state_is_tuple = False  # We use variable length dynamic_rnn, so we need to know this if we want to use the code we have
-has_training_bool = False
 if cell_name == "RRU":  # ReZero version
     from cells.RRUCell import RRUCell
     cell_fn = RRUCell
     output_size = 256
-    has_training_bool = True
     model_name = 'rru_model'
 
 elif cell_name == "GRRUA":  # Gated version with separate output size
     from cells.GatedRRUCell_a import RRUCell
     cell_fn = RRUCell
-    has_training_bool = True
     output_size = 256
     model_name = "grrua_model"  # We have hopes for this one
 
@@ -92,7 +89,7 @@ log_path = 'logdir_imdb/'
 log_after_this_many_steps = 0
 assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 100
+print_after_this_many_steps = 1
 assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
 
 
@@ -133,7 +130,7 @@ class IMDBModel:
         # Create the RNN cell, corresponding to the one you chose, for example, RRU, GRU, LSTM, MogrifierLSTM
         cells = []
         for _ in range(number_of_layers):
-            if has_training_bool:
+            if cell_name in ["RRU", "GRRUA"]:
                 cell = cell_fn(hidden_units, training=training)
             else:
                 cell = cell_fn(hidden_units)
