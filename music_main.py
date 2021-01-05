@@ -14,12 +14,13 @@ from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
 from utils import get_batch
 
-from RAdam import RAdamOptimizer
+from cell_registry import get_cell_information
+
 # Importing the necessary stuff for hyperparameter optimization
 from hyperopt import hp, tpe, Trials, fmin
 
 # Importing fancier optimizer(s)
-# from RAdam import RAdamOptimizer
+from RAdam import RAdamOptimizer
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
 # import os
@@ -31,37 +32,7 @@ from hyperopt import hp, tpe, Trials, fmin
 # Choose your cell
 cell_name = "RRU"  # Here you can type in the name of the cell you want to use
 
-# Maybe we can put these in a separate file called cells.py or something, and import it
-has_separate_output_size = None  # Most cells don't have an output size, so we by default set it as None
-if cell_name == "RRU":  # ReZero version
-    from cells.RRUCell import RRUCell
-    cell_fn = RRUCell
-    has_separate_output_size = True
-    model_name = 'rru_model'
-
-elif cell_name == "GRRUA":  # Gated version with separate output size
-    from cells.GatedRRUCell_a import RRUCell
-    cell_fn = RRUCell
-    has_separate_output_size = True
-    model_name = "grrua_model"  # We have hopes for this one
-
-elif cell_name == "GRU":
-    from cells.GRUCell import GRUCell
-    cell_fn = GRUCell
-    model_name = 'gru_model'
-
-elif cell_name == "LSTM":
-    from cells.BasicLSTMCell import BasicLSTMCell
-    cell_fn = BasicLSTMCell
-    model_name = 'lstm_model'
-
-elif cell_name == "MogrifierLSTM":  # Comment this out and you don't have to have dm-sonnet, etc. installed
-    from cells.MogrifierLSTMCell import MogrifierLSTMCell
-    cell_fn = MogrifierLSTMCell
-    model_name = 'mogrifier_lstm_model'
-
-else:
-    raise ValueError(f"No such cell ('{cell_name}') has been implemented!")
+cell_fn, model_name, has_separate_output_size, _ = get_cell_information(cell_name)
 
 # Hyperparameters
 # Data parameters
