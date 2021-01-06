@@ -4,6 +4,7 @@ import numpy as np
 from tensorflow.keras.preprocessing import sequence
 
 
+# Function that loads the IMDB data set
 def load_data(num_words, trim_length):
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.imdb.load_data(num_words=num_words)
 
@@ -21,7 +22,7 @@ def load_data(num_words, trim_length):
     return x_train, y_train, x_test, y_test, maxlen
 
 
-# Define the encoder function
+# Function that returns the labels one hot encoded
 def one_hot_encode(labels):
     n_labels = len(labels)
     n_unique_labels = len(np.unique(labels))
@@ -30,7 +31,8 @@ def one_hot_encode(labels):
     return one_hot_encoded
 
 
-def get_sequence_lengths(sequences):  # Full sequence length minus the padded zeros
+# Function that returns sequence lengths minus the padded zeros
+def get_sequence_lengths(sequences):
     sequence_lengths = []
     for sequence_ in sequences:
         sequence_ = np.array(sequence_)  # Without this line it returns full length for casual lists [1,1,1,0,0]->5

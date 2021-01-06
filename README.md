@@ -102,21 +102,20 @@ conda activate RRU
 conda install tensorflow-gpu=1.15
 /host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install sklearn
 /host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
-/host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install tensorflow_datasets==3
 /host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install hyperopt
 ```
 
 ### 3. Run the experiments (change the inner configuration if you wish)
 
-### IMDB Sentiment Analysis
+### Sentiment Analysis
 
-1 – Run imdb_main.py
+1 – Run sa_main.py
 
 ### Language modeling
 
 1 - To prepare the data, you must run lm_utils.py
 
-You can change vocabulary_size for it in the main function, then you have to run it, for it to save them.
+You can change vocabulary_size for each data set in the main function, then you have to run it, for it to save them.
 
 2 - To start training/validation/testing, run lm_main.py
 
@@ -125,9 +124,9 @@ penn (Penn Treebank word-level), pennchar (Penn Treebank character-level)
 
 ### Music modeling
 
-1 - To prepare the data, you must run music_utils.py
+1 - To prepare the data, you must run mm_utils.py
 
-2 - To start training/validation/testing, run music_main.py
+2 - To start training/validation/testing, run mm_main.py
 
 Change hyperparameters inside to run different data sets, possibilities at the moment: "JSB Chorales", "MuseData",
 "Nottingham", "Piano-midi.de".

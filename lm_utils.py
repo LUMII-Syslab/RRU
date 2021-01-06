@@ -1,7 +1,11 @@
+# Importing numpy so we can use numpy arrays
 import numpy as np
+# Importing pickle so we can read and save pickle files
 import pickle
+# Importing zipfile so we can open zip files
 import zipfile
 
+# Importing Tokenizer so we can transform words to numbers easily
 from tensorflow.keras.preprocessing.text import Tokenizer
 
 supported_data_sets = ["enwik8", "text8", "pennchar", "penn"]
@@ -12,6 +16,7 @@ PADDING = "C_PAD"
 UNKNOWN = "C_UNK"
 
 
+# Prepares enwik8 or text8 data set (depending on which of their names was passed)
 def prepare_enwik8_or_text8(name, vocabulary_size):
     print(f"  Preparing {name}...")
     # Read data set to a variable
@@ -47,6 +52,7 @@ def prepare_enwik8_or_text8(name, vocabulary_size):
         pickle.dump([train_data, valid_data, test_data, vocabulary_size], f)
 
 
+# Prepares PTB character-level data set
 def prepare_pennchar(vocabulary_size):
     print("  Preparing Penn Treebank (PTB)...")
 
@@ -71,7 +77,8 @@ def prepare_pennchar(vocabulary_size):
         pickle.dump([train_data, valid_data, test_data, vocabulary_size], f)
 
 
-def get_vocabulary(data, vocabulary_size):  # Get the character vocabulary from the given data
+# Gets the character vocabulary from the given data
+def get_vocabulary(data, vocabulary_size):
     vocabulary = {}
     print("    Getting the vocabulary (an integer for each character)...")
     for char in data:
@@ -92,6 +99,7 @@ def get_vocabulary(data, vocabulary_size):  # Get the character vocabulary from 
     return {value: index for index, value in enumerate(sort)}
 
 
+# Numerates the data by the passed vocabulary
 def numerate(data, vocab):
     transformed_data = []
     print("    Sequence of characters -> sequence of integers...")
@@ -100,6 +108,7 @@ def numerate(data, vocab):
     return transformed_data
 
 
+# Prepares PTB word-level data set
 def prepare_penn(vocabulary_size):
     print("  Preparing Penn Treebank (PTB)...")
 
@@ -123,6 +132,7 @@ def prepare_penn(vocabulary_size):
         pickle.dump([train_data, valid_data, test_data, vocabulary_size], f)
 
 
+# Turns the passed data into numbers, and returns dictionaries and tokenizer to transform other data
 def process(raw_text, vocabulary_size):
     # We might want to delete some words - maybe delete punctuation marks and words like "I, and". nltk library can help
 
@@ -141,6 +151,7 @@ def process(raw_text, vocabulary_size):
     return data, word_to_index, index_to_word, t
 
 
+# Loads the data set with the passed name
 def load_data(name):
     print("Started loading data...")
     # Check if data set is supported
@@ -153,14 +164,7 @@ def load_data(name):
     return train_data, valid_data, test_data, vocabulary_size
 
 
-def one_hot_encode(labels, vocab_size):  # Currently not used anymore (you can check this statement later)
-    n_labels = len(labels)
-    n_unique_labels = vocab_size  # len(np.unique(labels))
-    one_hot_encoded = np.zeros((n_labels, n_unique_labels))  # Now it's [0 0] [0 0]
-    one_hot_encoded[np.arange(n_labels), labels] = 1  # Now it's [1 0] [0 1]
-    return one_hot_encoded
-
-
+# Get the indexes from which the training samples will start
 def get_window_indexes(data_length, window_size, step_size):
     indexes = []
     for i in range(0, data_length - window_size, step_size):
@@ -169,6 +173,7 @@ def get_window_indexes(data_length, window_size, step_size):
     return indexes
 
 
+# Get data from indexes (We did so we could save on memory)
 def get_input_data_from_indexes(data, indexes, window_size):
     sequences = []
     targets = []
@@ -191,6 +196,7 @@ if __name__ == '__main__':  # Main function
     TRAIN_DATA, VALID_DATA, TEST_DATA, VOCABULARY_SIZE = load_data("enwik8")
 
 
+# Returns a state with zeros with the correct shape
 def get_zeros_state(number_of_layers, batch_size, hidden_units, state_is_tuple=False):
     # state = np.zeros((number_of_layers, len(x_batch), hidden_units))
     zero_state = np.zeros((batch_size, hidden_units))

@@ -1,9 +1,14 @@
 import tensorflow as tf
 import numpy as np
-import time
-from datetime import datetime  # We'll use this to dynamically generate training event names
 
-from sklearn.utils import shuffle  # We'll use this to shuffle training data
+# We'll use this to measure time spent in training and testing
+import time
+
+# We'll use this to dynamically generate training event names (so each run has different name)
+from datetime import datetime
+
+# We'll use this to shuffle training data
+from sklearn.utils import shuffle
 
 # Importing some functions that will help us deal with the input data
 from music_utils import load_data, split_data_in_parts
@@ -12,12 +17,13 @@ from music_utils import load_data, split_data_in_parts
 from utils import find_optimal_hidden_units, print_trainable_variables, get_batch, save_model, restore_model
 from utils import print_trials_information, NetworkPrint
 
+# This function will allow us to get information about the picked cell
 from cell_registry import get_cell_information
 
 # Importing the necessary stuff for hyperparameter optimization
 from hyperopt import hp, tpe, Trials, fmin
 
-# Importing fancier optimizer(s)
+# Importing a great optimizer
 from RAdam import RAdamOptimizer
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
@@ -27,53 +33,72 @@ from RAdam import RAdamOptimizer
 # You can check if this line makes it train faster, while still training correctly
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
-# Choose your cell
-cell_name = "RRU"  # Here you can type in the name of the cell you want to use
+# Hyperparameters
+# 1. Data parameters
+# Choose data set to test on
+data_set_name = "Nottingham"  # string, one of these ["JSB Chorales", "MuseData", "Nottingham", "Piano-midi.de"]
+# How many time steps we will unroll in RNN
+window_size = 200  # int, >= 1
+# With what step_size we traverse a single sequence when cutting into window size parts
+step_size = window_size // 2  # int, >= 1
+# How many data samples we feed in a single time
+batch_size = 16  # int, >= 1
+# Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
+fixed_batch_size = False  # bool
+# Should we shuffle the samples?
+shuffle_data = True  # bool
+# 2. Model parameters
+# Name of the cell you want to test
+cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+# Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
+HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
+# Number of maximum allowed trainable parameters
+number_of_parameters = 5000000  # int, >= 1 (Probably way more than 1)
+# With what learning rate we optimize the model
+learning_rate = 0.001  # float, > 0
+# How many RNN layers should we have
+number_of_layers = 1  # int, >= 1
+# What should be the output size for the cells that have a separate output_size?
+output_size = 256  # int, >= 1 (Probably way more than 1)
+# Should we clip the gradients?
+clip_gradients = True  # bool,
+# If clip_gradients = True, with what multiplier should we clip them?
+clip_multiplier = 1.5  # float
+# 3. Training/testing process parameters
+# How many epochs should we run?
+num_epochs = 1000000  # int, >= 1
+# After how many epochs with no performance gain should we early stop? (0 disabled)
+break_epochs_no_gain = 7  # int, >= 0
+# Should we do hyperparameter optimization?
+do_hyperparameter_optimization = False  # bool
+# How many runs should we run hyperparameter optimization
+optimization_runs = 100  # int, >= 1
+# Path, where we will save the model for further evaluating
+ckpt_path = 'ckpt_music/'  # string
+# Path, where we will store ours logs
+log_path = 'logdir_music/'  # string
+# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
+log_after_this_many_steps = 0  # integer, >= 0
+# After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
+print_after_this_many_steps = 1  # integer, >= 0
 
+# Get information about the picked cell
 cell_fn, model_name, has_separate_output_size, _ = get_cell_information(cell_name)
 
-# Hyperparameters
-# Data parameters
-# Choose on of "JSB Chorales" | "MuseData" | "Nottingham" | "Piano-midi.de" (which data set to test on)
-data_set_name = "Nottingham"
-vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
-window_size = 200  # If you have a lot of resources you can run this on full context size - 160/3780/1793/3623
-step_size = window_size // 2
-batch_size = 16  # Max batch_sizes: JSB Chorales 76; MuseData 124; Nottingham 170; Piano-midi.de 12
-fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
-shuffle_data = True  # Should we shuffle the samples?
-# Training
-num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
-break_epochs_no_gain = 7  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
-HIDDEN_UNITS = 128 * 3  # This will only be used if the number_of_parameters is None or < 1
-number_of_parameters = 5000000  # 1 million learnable parameters
-learning_rate = 0.001
-number_of_layers = 1
-do_hyperparameter_optimization = False
-middle_layer_size_multiplier = 2
-# gate_bias = 1
-dropout_rate = 0.5
-clip_gradients = True
-clip_multiplier = 1.5  # This value matters only if clip_gradients = True
+# If the picked cell doesn't have a separate output size, we set is as None, so we can later process that
+if not has_separate_output_size:
+    output_size = None
 
-ckpt_path = 'ckpt_music/'
-log_path = 'logdir_music/'
-
-# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
-log_after_this_many_steps = 0
-assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
-# After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 1
-assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
-
-current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
+# Calculating the path, in which we will store the logs
+current_time = datetime.now().strftime("%Y%m%d-%H%M%S")  # We put current time in the name, so it is unique in each run
 output_path = log_path + model_name + f'/{data_set_name}/' + current_time
 
 # Don't print TensorFlow messages, that we don't need
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
-class MusicModel:
+# Class for solving music modeling tasks, you can create a model, train it and test it
+class MusicModelingModel:
 
     def __init__(self, hidden_units):
 
@@ -97,12 +122,7 @@ class MusicModel:
         cells = []
         for _ in range(number_of_layers):
             if cell_name in ["RRU", "GRRUA"]:
-                cell = cell_fn(hidden_units,
-                               training=training,
-                               output_size=output_size,
-                               # gate_bias=gate_bias,
-                               dropout_rate=dropout_rate,
-                               middle_layer_size_multiplier=middle_layer_size_multiplier)
+                cell = cell_fn(hidden_units, training=training, output_size=output_size)
             else:
                 cell = cell_fn(hidden_units)
             cells.append(cell)
@@ -158,13 +178,10 @@ class MusicModel:
             print(c)
 
         # Declare our optimizer, we have to check which one works better.
-        # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
         optimizer = RAdamOptimizer(learning_rate=learning_rate,
                                    L2_decay=0.0,
                                    decay_vars=decay_vars,
                                    clip_gradients=clip_gradients, clip_multiplier=clip_multiplier).minimize(loss)
-        # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
-        # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
         # What to log to TensorBoard if a number was specified for "log_after_this_many_steps" variable
         tf.summary.scalar("loss", loss)
@@ -184,7 +201,7 @@ class MusicModel:
 
         print("\nGraph Built...\n")
 
-    def fit(self, train_data, valid_data=None):
+    def fit(self, train_data, valid_data):  # Trains the model
         tf_config = tf.ConfigProto()
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
@@ -276,7 +293,7 @@ class MusicModel:
                     print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
                     return
 
-    def evaluate(self, data, mode="testing", session=None, iterator=1):
+    def evaluate(self, data, mode="testing", session=None, iterator=1):  # Tests the model
         assert mode in ["validation", "testing"], "Mode must be \"validation\" or \"testing\""
         if mode == "validation":
             NetworkPrint.validation_start(iterator)
@@ -336,6 +353,7 @@ class MusicModel:
         return average_loss
 
 
+# Creates a sequence length matrix with coefficients so we get a fair loss
 def create_sequence_length_matrix(batch_dimension, sequence_lengths):
     matrix = np.zeros([batch_dimension, window_size])
 
@@ -352,12 +370,11 @@ def create_sequence_length_matrix(batch_dimension, sequence_lengths):
 
 
 if __name__ == '__main__':  # Main function
-    output_size = 256 if has_separate_output_size else None
 
     TRAINING_DATA, VALIDATION_DATA, TESTING_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
     # From which function/class we can get the model
-    model_function = MusicModel
+    model_function = MusicModelingModel
 
     if not do_hyperparameter_optimization:
         HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
@@ -370,8 +387,6 @@ if __name__ == '__main__':  # Main function
 
         MODEL.evaluate(TESTING_DATA)  # Test the last saved model
     else:
-        times_to_evaluate = 100
-
         # What to do with hp.uniforms that need to be rounded
         round_uniform = ['num_params', 'out_size']
 
@@ -379,36 +394,27 @@ if __name__ == '__main__':  # Main function
             # hp.uniform
             hp.uniform('num_params', 1000000, 15000000),
             hp.uniform('out_size', 32, 256),
-            hp.uniform('middle_multiplier', 0.5, 8),
-            hp.uniform('drop_rate', 0.0, 0.9),
-            # hp.uniform('gate_bias_value', -1, 3),
             # hp.loguniform
             hp.loguniform('lr', np.log(0.0004), np.log(0.004))
         ]
 
-        def objective(num_params, out_size, middle_multiplier, drop_rate, lr):
+        def objective(num_params, out_size, drop_rate, lr):
             # For some values we need extra stuff
             num_params = round(num_params)
             out_size = round(out_size)
 
             # We'll optimize these parameters
-            global learning_rate, number_of_parameters
-            global output_size, middle_layer_size_multiplier, dropout_rate  # gate_bias
+            global learning_rate, number_of_parameters, output_size
             learning_rate = lr
             number_of_parameters = num_params
             output_size = out_size
-            middle_layer_size_multiplier = middle_multiplier
-            dropout_rate = drop_rate
-            # gate_bias = gate_bias_value
 
             # This might give some clues
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
-                          f"/num_params{num_params}out_size{out_size}middle_multiplier{middle_multiplier}" \
-                          f"lr{lr}dropout{drop_rate}"  # gate_bias{gate_bias}
+                          f"/num_params{num_params}out_size{out_size}lr{lr}"
 
-            global HIDDEN_UNITS
-            global model_function
+            global HIDDEN_UNITS, model_function
 
             HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
                                                      number_of_parameters=number_of_parameters,
@@ -429,8 +435,8 @@ if __name__ == '__main__':  # Main function
         # Create trials object
         tpe_trials = Trials()
 
-        # Run 2000 evals with the tpe algorithm
-        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
+        # Run specified evaluations with the tpe algorithm
+        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=optimization_runs)
 
         print_trials_information(hyperopt_trials=tpe_trials,
                                  round_uniform=round_uniform,

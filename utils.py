@@ -4,6 +4,7 @@ import numpy as np
 import math
 
 
+# Function that return the amount of trainable variables in the model
 def get_total_variables():
     trainable_variables = tf.trainable_variables()
     variables_total = 0
@@ -12,6 +13,7 @@ def get_total_variables():
     return variables_total
 
 
+# Function that finds the optimal hidden units to fit number_of_parameters
 def find_optimal_hidden_units(hidden_units,
                               number_of_parameters,
                               model_function,
@@ -144,6 +146,7 @@ def print_trials_information(hyperopt_trials, hyperopt_choices=None, reverse_hyp
     print_trial_information(best_trial)
 
 
+# Function that returns a batch of data from certain position
 def get_batch(data, current_batch_index, batch_size, fixed_batch_size=True, continuous_batches=False):
     number_of_batches = len(data) // batch_size
 
@@ -166,11 +169,13 @@ def get_batch(data, current_batch_index, batch_size, fixed_batch_size=True, cont
     return batch
 
 
+# Function that saves the current model atht the given path
 def save_model(sess, ckpt_path, model_name):
     saver = tf.compat.v1.train.Saver()
     saver.save(sess, ckpt_path + model_name + ".ckpt")
 
 
+# Function that restores a saved model if it exists
 def restore_model(sess, ckpt_path):
     ckpt = tf.train.get_checkpoint_state(ckpt_path)
     saver = tf.compat.v1.train.Saver()
@@ -179,6 +184,7 @@ def restore_model(sess, ckpt_path):
         saver.restore(sess, ckpt.model_checkpoint_path)
 
 
+# Class for printing training and testing info
 class NetworkPrint:
 
     @staticmethod

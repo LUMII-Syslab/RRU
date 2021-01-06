@@ -10,6 +10,7 @@ prepared_data_path = "data/music/ready/"
 supported_data_sets = ["JSB Chorales", "MuseData", "Nottingham", "Piano-midi.de"]
 
 
+# Checks if all supported data sets are download, and throws error if they are not
 def check_if_data_sets_are_downloaded():
     if not os.path.exists(downloaded_data_path):
         raise FileNotFoundError("The downloaded data path you specified doesn't exist!")
@@ -20,6 +21,7 @@ def check_if_data_sets_are_downloaded():
     print("All the supported data sets have been found in your specified folder!")
 
 
+# Returns the smallest of variables (but checks for None)
 def smallest(a, b):
     if a is None:
         return b
@@ -29,6 +31,7 @@ def smallest(a, b):
         return b
 
 
+# Returns the biggest of variables (but checks for None)
 def biggest(a, b):
     if a is None:
         return b
@@ -38,6 +41,7 @@ def biggest(a, b):
         return b
 
 
+# Analyses the data in the pickle files
 def analyse_data(data_path=downloaded_data_path, mode="full"):
     assert mode in ["mini", "full"], "Invalid value for variable mode, it must be \"mini\" or \"full\"!"
     print("Starting data analysis...")
@@ -111,6 +115,7 @@ def analyse_data(data_path=downloaded_data_path, mode="full"):
             print(18 * ' ', f"Range - from {global_value_range[0]} to {global_value_range[1]}")
 
 
+# Prepares the data set with passed name
 def prepare_data(name):
     # Check if data set is supported
     if name not in supported_data_sets:
@@ -133,6 +138,7 @@ def prepare_data(name):
         pickle.dump([train, valid, test, MIDI_numbers], f)
 
 
+# Masks data in a binary format
 def mask_the_data(data):
     big_sequences = []
     for seq in data:
@@ -187,6 +193,7 @@ if __name__ == '__main__':  # Main function
     analyse_data(data_path=prepared_data_path, mode="full")
 
 
+# Loads the data set with passed name
 def load_data(name):
     print("Started loading data...")
     # Check if data set is supported
@@ -199,6 +206,7 @@ def load_data(name):
     return train_data, valid_data, test_data, vocabulary_size
 
 
+# Splits the data set in parts as the parameters passed declare
 def split_data_in_parts(data, window_size, step_size, time_step_feature_count, min_length=1):
     sequences = []
     targets = []

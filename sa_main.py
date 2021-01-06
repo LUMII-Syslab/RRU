@@ -1,26 +1,29 @@
 import tensorflow as tf
+
+# We'll use this to measure time spent in training and testing
 import time
-from datetime import datetime  # We'll use this to dynamically generate training event names
 
-import argparse
+# We'll use this to dynamically generate training event names (so each run has different name)
+from datetime import datetime
 
+# We'll use this to shuffle training data
 from sklearn.utils import shuffle
 
-# Importing functions to load the data in the correct format
+# Importing some functions that will help us deal with the input data
 from sa_utils import load_data, get_sequence_lengths
 
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units, print_trainable_variables, get_batch, save_model, restore_model
 from utils import print_trials_information, NetworkPrint
 
+# This function will allow us to get information about the picked cell
 from cell_registry import get_cell_information
 
 # Importing the necessary stuff for hyperparameter optimization
 from hyperopt import hp, tpe, Trials, fmin
 
-# Importing fancier optimizer(s)
+# Importing a great optimizer
 from RAdam import RAdamOptimizer
-from adam_decay import AdamOptimizer_decay
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
 # import os
@@ -29,47 +32,73 @@ from adam_decay import AdamOptimizer_decay
 # You can check if this line makes it train faster, while still training correctly
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
+# Hyperparameters
+# 1. Data parameters
+vocabulary_size = 10000  # 24902 is the max (used to be 88583 for tfds)
+# How many time steps we will unroll in RNN (IMDB has sentences with [70-2697] words) (None means max)
+max_sequence_length = 500  # int, >= 1
+# How many data samples we feed in a single time (IMDB maximum batch_size is 25000)
+batch_size = 64  # int, >= 1
+# # Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
+fixed_batch_size = False  # bool
+# Should we shuffle the samples?
+shuffle_data = True  # bool
+# 2. Model parameters
+# Name of the cell you want to test
+cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+# Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
+HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
+# Number of maximum allowed trainable parameters
+number_of_parameters = 2000000  # int, >= 1 (Probably way more than 1)
+# With what learning rate we optimize the model
+learning_rate = 0.001  # float, > 0
+# How many RNN layers should we have
+number_of_layers = 2  # int, >= 1
+# What should be the output size for the cells that have a separate output_size?
+output_size = 256  # int, >= 1 (Probably way more than 1)
+# Should we clip the gradients?
+clip_gradients = True  # bool,
+# If clip_gradients = True, with what multiplier should we clip them?
+clip_multiplier = 5.  # float
+# What should be the embedding size for the data (how many dimensions)?
+embedding_size = 32  # int, >= 1
+# 3. Training/testing process parameters
 # Choose your cell
-cell_name = "RRU"  # Here you can type in the name of the cell you want to use
+# How many epochs should we run?
+num_epochs = 10  # int, >= 1
+# Should we do hyperparameter optimization?
+do_hyperparameter_optimization = False  # bool
+# How many runs should we run hyperparameter optimization
+optimization_runs = 100  # int, >= 1
+# Path, where we will save the model for further evaluating
+ckpt_path = 'ckpt_imdb/'  # string
+# Path, where we will store ours logs
+log_path = 'logdir_imdb/'  # string
+# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
+log_after_this_many_steps = 0  # integer, >= 0
+# After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
+print_after_this_many_steps = 1  # integer, >= 0
 
+# There are 2 classes for sentiment guessing for IMDB data set
+num_classes = 2
+
+# Get information about the picked cell
 cell_fn, model_name, has_separate_output_size, state_is_tuple = get_cell_information(cell_name)
 
-# Hyperparameters
-vocabulary_size = 10000  # 24902 is the max (used to be 88583 for tfds)
-max_sequence_length = 500  # [70-2697] words in tf.keras (used to be [6-2493] words in tdfs). None means max
-batch_size = 64  # Max batch_size = 25000
-num_epochs = 10
-HIDDEN_UNITS = 128
-number_of_parameters = 2000000  # 2 million
-number_of_layers = 2
-embedding_size = 32
-num_classes = 2
-learning_rate = 0.001
-shuffle_data = True
-fixed_batch_size = False
-clip_gradients = True
-clip_multiplier = 5.  # This value matters only if clip_gradients = True
-do_hyperparameter_optimization = False
+# If the picked cell doesn't have a separate output size, we set is as None, so we can later process that
+if not has_separate_output_size:
+    output_size = None
 
-ckpt_path = 'ckpt_imdb/'
-log_path = 'logdir_imdb/'
-
-# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
-log_after_this_many_steps = 0
-assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
-# After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 1
-assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
-
-
-current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
+# Calculating the path, in which we will store the logs
+current_time = datetime.now().strftime("%Y%m%d-%H%M%S")  # We put current time in the name, so it is unique in each run
 output_path = log_path + model_name + '/' + current_time
 
 # Don't print TensorFlow messages, that we don't need
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
-class IMDBModel:
+# Class for solving sentiment analysis tasks, you can create a model, train it and test it
+class SentimentAnalysisModel:
 
     def __init__(self, hidden_units):
 
@@ -103,7 +132,7 @@ class IMDBModel:
         cells = []
         for _ in range(number_of_layers):
             if cell_name in ["RRU", "GRRUA"]:
-                cell = cell_fn(hidden_units, training=training)
+                cell = cell_fn(hidden_units, training=training, output_size=output_size)
             else:
                 cell = cell_fn(hidden_units)
             cells.append(cell)
@@ -157,17 +186,10 @@ class IMDBModel:
             print(c)
 
         # Declare our optimizer, we have to check which one works better.
-        # Before: Adam gave better training accuracy and loss, but RMSProp gave better validation accuracy and loss
-        # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
         optimizer = RAdamOptimizer(learning_rate=learning_rate,
                                    L2_decay=0.0,
                                    decay_vars=decay_vars,
                                    clip_gradients=clip_gradients, clip_multiplier=clip_multiplier).minimize(loss)
-        # optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
-        #                                L2_decay=0.01,
-        #                                decay_vars=decay_vars).minimize(loss)
-        # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
-        # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
         # What to log to TensorBoard if a number was specified for "log_after_this_many_steps" variable
         tf.summary.scalar("accuracy", accuracy)
@@ -188,7 +210,7 @@ class IMDBModel:
 
         print("\nGraph Built...\n")
 
-    def fit(self, x_train, y_train):
+    def fit(self, x_train, y_train):  # Trains the model
         sess = tf.Session()
         NetworkPrint.training_start()
 
@@ -256,7 +278,7 @@ class IMDBModel:
         # Save checkpoint
         save_model(sess, ckpt_path, model_name)
 
-    def evaluate(self, x_test, y_test):
+    def evaluate(self, x_test, y_test):  # Tests the model
         sess = tf.Session()
         NetworkPrint.testing_start()
 
@@ -313,25 +335,13 @@ class IMDBModel:
         return average_accuracy
 
 
-def parse_args():  # Parse arguments. Currently not used, we will need to write it differently later.
-    parser = argparse.ArgumentParser(description='Different RNN cell comparison for IMDB review sentiment analysis')
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-t', '--train', action='store_true', help='train model')
-    group.add_argument('-v', '--validate', action='store_true', help='validate model')
-    args = vars(parser.parse_args())
-    return args
-
-
 if __name__ == '__main__':  # Main function
-    # ARGS = parse_args()  # We'll use this when we implement parse_args again
-
-    output_size = 256 if has_separate_output_size else None
 
     # Load the IMDB data set
     X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, max_sequence_length = load_data(vocabulary_size, max_sequence_length)
 
     # From which function/class we can get the model
-    model_function = IMDBModel
+    model_function = SentimentAnalysisModel
 
     if not do_hyperparameter_optimization:
         HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
@@ -345,8 +355,6 @@ if __name__ == '__main__':  # Main function
         MODEL.evaluate(X_TEST, Y_TEST)
     else:
         # This needs better hyperparameter config (didn't update it yet, because didn't run it yet)
-        times_to_evaluate = 2
-
         lr_choice = [0.1, 0.05, 0.01, 0.005, 0.001]
         num_layers_choice = [1, 2, 3]
         batch_choice = [1, 2, 4, 8, 16, 32, 64]
@@ -363,22 +371,18 @@ if __name__ == '__main__':  # Main function
             hp.choice('batch', batch_choice)
         ]
 
-
         def objective(lr, num_layers, batch):
             # The parameters to be optimized
-            global learning_rate
+            global learning_rate, number_of_layers, batch_size
             learning_rate = lr
-            global number_of_layers
             number_of_layers = num_layers
-            global batch_size
             batch_size = batch
 
             # This might give some clues
             global output_path
             output_path = f"{log_path}{model_name}/{current_time}/lr{lr}layers{num_layers}batch{batch}"
 
-            global HIDDEN_UNITS
-            global model_function
+            global HIDDEN_UNITS, model_function
 
             HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
                                                      number_of_parameters=number_of_parameters,
@@ -401,6 +405,7 @@ if __name__ == '__main__':  # Main function
         # Create trials object
         tpe_trials = Trials()
 
-        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
+        # Run specified evaluations with the tpe algorithm
+        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=optimization_runs)
 
         print_trials_information(tpe_trials, choices, metric="Accuracy", reverse_sign=True)

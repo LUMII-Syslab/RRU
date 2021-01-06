@@ -1,9 +1,14 @@
 import tensorflow as tf
 import numpy as np
-import time
-from datetime import datetime  # We'll use this to dynamically generate training event names
 
-from sklearn.utils import shuffle  # We'll use this to shuffle training data
+# We'll use this to measure time spent in training and testing
+import time
+
+# We'll use this to dynamically generate training event names (so each run has different name)
+from datetime import datetime
+
+# We'll use this to shuffle training data
+from sklearn.utils import shuffle
 
 # Importing some functions that will help us deal with the input data
 from lm_utils import load_data, get_window_indexes, get_input_data_from_indexes, get_zeros_state
@@ -12,14 +17,14 @@ from lm_utils import load_data, get_window_indexes, get_input_data_from_indexes,
 from utils import find_optimal_hidden_units, print_trainable_variables, get_batch, save_model, restore_model
 from utils import print_trials_information, NetworkPrint
 
+# This function will allow us to get information about the picked cell
 from cell_registry import get_cell_information
 
 # Importing the necessary stuff for hyperparameter optimization
 from hyperopt import hp, tpe, Trials, fmin
 
-# Importing fancier optimizer(s)
+# Importing a great optimizer
 from RAdam import RAdamOptimizer
-from adam_decay import AdamOptimizer_decay
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
 # import os
@@ -28,67 +33,90 @@ from adam_decay import AdamOptimizer_decay
 # You can check if this line makes it train faster, while still training correctly
 # os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
-# Choose your cell
-cell_name = "RRU"  # Here you can type in the name of the cell you want to use
-
-cell_fn, model_name, has_separate_output_size, state_is_tuple = get_cell_information(cell_name)
-
 # Hyperparameters
-# Data parameters
-data_set_name = "penn"  # "enwik8" | "text8" | "pennchar" | "penn" (which data set to test on)
+# 1. Data parameters
+# Choose data set to test on
+data_set_name = "pennchar"  # string, one of these ["enwik8", "text8", "pennchar", "penn"]
+# How many time steps we will unroll in RNN
+# We do character-level 512, word-level 64
+window_size = 512  # int, >= 1 (if model isn't stateful or continuous_batches) else 1 or (>= 1 and % 2 == 0)
+# How many data samples we feed in a single time
+batch_size = 64  # int, >= 1
+# Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
+fixed_batch_size = False  # bool
+# Should we shuffle the samples?
+# We do character-level False, word-level True
+shuffle_data = False  # bool
+# Should batches go continuously? This might give performance boost with a stateful RNN cell
+# We do character-level True, word-level False
+continuous_batches = True  # bool
+# 2. Model parameters
+# Name of the cell you want to test
+cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+# Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
+HIDDEN_UNITS = 1024  # int, >= 1 (Probably way more than 1)
+# Number of maximum allowed trainable parameters
+number_of_parameters = 20000000  # int, >= 1 (Probably way more than 1)
+# With what learning rate we optimize the model
+learning_rate = 0.003  # float, > 0
+# How many RNN layers should we have
+number_of_layers = 2  # int, >= 1
+# What should be the output size for the cells that have a separate output_size?
+output_size = 256  # int, >= 1 (Probably way more than 1)
+# Should we clip the gradients?
+clip_gradients = True  # bool
+# If clip_gradients = True, with what multiplier should we clip them?
+clip_multiplier = 10.  # float
+# What should be the embedding size for the data (how many dimensions)?
+# We do PTB character-level 16, PTB word-level 64
+embedding_size = 64  # int, >= 1
+# Should the RNN cell be stateful
+# We do character-level True, word-level False
+stateful = True  # bool
+# If stateful = True, you can choose a chance that zero_state will be passed instead of last state
+zero_state_chance = 0.1  # float, 0 <= value <= 1
+# What dropout should we apply over the RNN output
+outer_dropout = 0  # float, 0 <= value <= 1
+# 3. Training/testing process parameters
+# How many epochs should we run?
+num_epochs = 1000000  # int, >= 1
+# After how many epochs with no performance gain should we early stop? (0 disabled)
+break_epochs_no_gain = 7  # int, >= 0
+# Should we do hyperparameter optimization?
+do_hyperparameter_optimization = False   # bool
+# How many runs should we run hyperparameter optimization
+optimization_runs = 100  # int, >= 1
+# Path, where we will save the model for further evaluating
+ckpt_path = 'ckpt_lm/'  # string
+# Path, where we will store ours logs
+log_path = 'logdir_lm/'  # string
+# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
+log_after_this_many_steps = 0  # integer, >= 0
+# After how many steps should we print the results of training/validation/testing (0 - don't print until the last step)
+print_after_this_many_steps = 1  # integer, >= 0
+
+# We need to know whether the data set is character-level or word-level
 character_level = True
 if data_set_name in ["penn"]:
     character_level = False
-vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
-# If the model isn't stateful or continuous_batches, this must be 1 or an even number (otherwise loss calculation won't
-# be correct (we do half_loss))
-window_size = 512 if character_level else 64
-assert window_size == 1 or window_size % 2 == 0, "Variable window_size must be 1 or an even number!"
-batch_size = 64  # Max batch_sizes (on 512 half-sequences): ptb word 137; ptb char 761; enwik8 & text8 = 9765
-fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
-# We do character-level True, word-level False
-continuous_batches = False  # Batches go continuously, this might give performance boost with a stateful RNN cell
-# We do character-level False, word-level True
-shuffle_data = True  # Should we shuffle the samples?
-# Training
-num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
-# If validation perplexity doesn't get lower, after how many epochs we should break (-1 -> disabled)
-break_epochs_no_gain = 7
-# 24M everything else, PTB Word 20 mil?
-number_of_parameters = 20000000  # 20 million learnable parameters
-HIDDEN_UNITS = 1024  # This will only be used if the number_of_parameters is None or < 1
-embedding_size = 64  # PTB character-level 16, PTB word-level 64, what for others? 128?
-learning_rate = 0.003  # Each cell needs different - 0,001 LSTM and GRU explodes a bit, Mogrifier can't learn at low
-number_of_layers = 2
-# We do character-level True, word-level False
-stateful = False  # Should the RNN cell be stateful? If True, you can modify it's zero_state_chance below.
-zero_state_chance = 0.1  # Chance that zero_state is passed instead of last state (I don't know what value is best yet)
-outer_dropout = 0  # 0, if you do not want outer dropout
-L2_decay = 0.0
-do_hyperparameter_optimization = False
-z_transformations = 1
-middle_layer_size_multiplier = 2
-clip_gradients = True
-clip_multiplier = 10.  # This value matters only if clip_gradients = True
 
-ckpt_path = 'ckpt_lm/'
-log_path = 'logdir_lm/'
+# Get information about the picked cell
+cell_fn, model_name, has_separate_output_size, state_is_tuple = get_cell_information(cell_name)
 
-# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
-log_after_this_many_steps = 0
-assert log_after_this_many_steps >= 0, "Invalid value for variable log_after_this_many_steps, it must be >= 0!"
-# After how many steps should we print the results of training/validation/testing (0 - don't print until the last step)
-print_after_this_many_steps = 1
-assert print_after_this_many_steps >= 0, "Invalid value for variable print_after_this_many_steps, it must be >= 0!"
+# If the picked cell doesn't have a separate output size, we set is as None, so we can later process that
+if not has_separate_output_size:
+    output_size = None
 
-current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
+# Calculating the path, in which we will store the logs
+current_time = datetime.now().strftime("%Y%m%d-%H%M%S")  # We put current time in the name, so it is unique in each run
 output_path = log_path + model_name + f'/{data_set_name}/' + current_time
 
 # Don't print TensorFlow messages, that we don't need
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
-class LMModel:
+# Class for solving language modeling tasks, you can create a model, train it and test it
+class LanguageModelingModel:
 
     def __init__(self, hidden_units):
 
@@ -118,9 +146,7 @@ class LMModel:
         cells = []
         for _ in range(number_of_layers):
             if cell_name in ["RRU", "GRRUA"]:
-                cell = cell_fn(hidden_units, training=training, z_transformations=z_transformations,
-                               middle_layer_size_multiplier=middle_layer_size_multiplier,
-                               output_size=output_size)
+                cell = cell_fn(hidden_units, training=training, output_size=output_size)
             else:
                 cell = cell_fn(hidden_units)
             cells.append(cell)
@@ -214,17 +240,10 @@ class LMModel:
             print(c)
 
         # Declare our optimizer, we have to check which one works better.
-        # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
         optimizer = RAdamOptimizer(learning_rate=learning_rate,
-                                   L2_decay=L2_decay,
+                                   L2_decay=0.0,
                                    decay_vars=decay_vars,
                                    clip_gradients=clip_gradients, clip_multiplier=clip_multiplier).minimize(loss)
-        '''
-            optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
-                                            L2_decay=L2_decay,
-                                            decay_vars=decay_vars).minimize(loss)'''
-        # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
-        # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
         # What to log to TensorBoard if a number was specified for "log_after_this_many_steps" variable
         tf.summary.scalar("half_accuracy", half_accuracy)
@@ -255,7 +274,7 @@ class LMModel:
 
         print("\nGraph Built...\n")
 
-    def fit(self, training_data, validation_data):
+    def fit(self, training_data, validation_data):  # Trains the model
         tf_config = tf.ConfigProto()
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
@@ -397,14 +416,9 @@ class LMModel:
 
                 if epochs_no_gain == break_epochs_no_gain:
                     print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
-                    break  # Probably return would do the same thing (for now)
-        # Training ends here
-        '''We used to save here - model saved after the last epoch'''
-        # Save checkpoint
-        # saver = tf.compat.v1.train.Saver()
-        # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model
+                    return
 
-    def evaluate(self, data, mode="testing", session=None, iterator=1):
+    def evaluate(self, data, mode="testing", session=None, iterator=1):  # Tests the model
         assert mode in ["validation", "testing"], "Mode must be \"validation\" or \"testing\""
         if mode == "validation":
             NetworkPrint.validation_start(iterator)
@@ -433,13 +447,12 @@ class LMModel:
         for i in range(num_batches):
             x_batch = get_batch(indexes, i, batch_size, fixed_batch_size, continuous_batches)
 
-            if stateful:
-                state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
-
             # Now we have batch of integers to look in text from
             x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
 
             if stateful:
+                state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
+
                 feed_dict = {
                     self.x: x_batch,
                     self.y: y_batch,
@@ -491,19 +504,18 @@ class LMModel:
 
 
 if __name__ == '__main__':  # Main function
-    output_size = 256 if has_separate_output_size else None
 
     TRAINING_DATA, VALIDATION_DATA, TESTING_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
     # To see how it trains in small amounts (If it's usually in a 90%/5%/5% split, now it's in a 1%/1%/1% split)
-    # '''
+    '''
     TRAINING_DATA = TRAINING_DATA[:len(TRAINING_DATA) // 90]
     VALIDATION_DATA = VALIDATION_DATA[:len(VALIDATION_DATA) // 5]
     TESTING_DATA = TESTING_DATA[:len(TESTING_DATA) // 5]
-    # '''
+    '''
 
     # From which function/class we can get the model
-    model_function = LMModel
+    model_function = LanguageModelingModel
 
     if not do_hyperparameter_optimization:
         HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
@@ -516,17 +528,13 @@ if __name__ == '__main__':  # Main function
 
         MODEL.evaluate(TESTING_DATA)  # Test the last saved model
     else:
-        times_to_evaluate = 100
-
         # hp.choice
         batch_choice = [32, 64, 128]
         num_layers_choice = [1, 2, 3]
-        z_trans_choice = [1, 2]
         # We need this, so we can print the hp.choice answers normally
         choices = {
             'batch': batch_choice,
-            'num_layers': num_layers_choice,
-            'z_trans': z_trans_choice
+            'num_layers': num_layers_choice
         }
 
         # What to do with hp.uniforms that need to be rounded
@@ -536,41 +544,32 @@ if __name__ == '__main__':  # Main function
             # hp.choice
             hp.choice('batch', batch_choice),
             hp.choice('num_layers', num_layers_choice),
-            hp.choice('z_trans', z_trans_choice),
             # hp.uniform
             hp.uniform('num_params', 12000000, 28000000),
             hp.uniform('out_size', 128, 256),
-            hp.uniform('middle_multiplier', 0.1, 8),
             # hp.loguniform
             hp.loguniform('lr', np.log(0.0001), np.log(0.009)),
         ]
 
 
-        def objective(batch, num_layers, z_trans, num_params, out_size, middle_multiplier, lr):
+        def objective(batch, num_layers, num_params, out_size, lr):
             # For some values we need extra stuff
             num_params = round(num_params)
             out_size = round(out_size)
 
             # We'll optimize these parameters
-            global batch_size, number_of_layers, number_of_parameters, learning_rate
-            global z_transformations, output_size, middle_layer_size_multiplier
+            global batch_size, number_of_layers, number_of_parameters, learning_rate, output_size
             batch_size = batch
             number_of_layers = num_layers
-            z_transformations = z_trans
             number_of_parameters = num_params
             output_size = out_size
-            middle_layer_size_multiplier = middle_multiplier
             learning_rate = lr
 
-
-            # This might give some clues
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
-                          f"/batch{batch}num_layers{num_layers}z_trans{z_trans}num_params{num_params}" \
-                          f"out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}"
+                          f"/batch{batch}num_layers{num_layers}num_params{num_params}out_size{out_size}lr{lr}"
 
-            global HIDDEN_UNITS
-            global model_function
+            global HIDDEN_UNITS, model_function
 
             HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
                                                      number_of_parameters=number_of_parameters,
@@ -591,7 +590,8 @@ if __name__ == '__main__':  # Main function
         # Create trials object
         tpe_trials = Trials()
 
-        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
+        # Run specified evaluations with the tpe algorithm
+        tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=optimization_runs)
 
         print_trials_information(tpe_trials,
                                  hyperopt_choices=choices,
