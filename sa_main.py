@@ -11,6 +11,7 @@ from sa_utils import load_data, get_sequence_lengths
 
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units, print_trainable_variables, get_batch
+from utils import save_model, restore_model
 
 from cell_registry import get_cell_information
 
@@ -253,8 +254,7 @@ class IMDBModel:
             training_writer.flush()
         # Training ends here
         # Save checkpoint
-        saver = tf.compat.v1.train.Saver()
-        saver.save(sess, ckpt_path + model_name + ".ckpt")
+        save_model(sess, ckpt_path, model_name)
 
     def evaluate(self, x_test, y_test):
         sess = tf.Session()
@@ -266,11 +266,7 @@ class IMDBModel:
         testing_writer = tf.summary.FileWriter(output_path + "/testing")
 
         # Restore session
-        ckpt = tf.train.get_checkpoint_state(ckpt_path)
-        saver = tf.compat.v1.train.Saver()
-        # If there is a correct checkpoint at the path restore it
-        if ckpt and ckpt.model_checkpoint_path:
-            saver.restore(sess, ckpt.model_checkpoint_path)
+        restore_model(sess, ckpt_path)
 
         num_batches = len(x_test) // batch_size
 

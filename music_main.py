@@ -13,6 +13,8 @@ from music_utils import split_data_in_parts
 from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
 from utils import get_batch
+from utils import save_model
+from utils import restore_model
 
 from cell_registry import get_cell_information
 
@@ -45,7 +47,7 @@ batch_size = 16  # Max batch_sizes: JSB Chorales 76; MuseData 124; Nottingham 17
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 shuffle_data = True  # Should we shuffle the samples?
 # Training
-num_epochs = 2#1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
+num_epochs = 3  # 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 break_epochs_no_gain = 7  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
 HIDDEN_UNITS = 128 * 3  # This will only be used if the number_of_parameters is None or < 1
 number_of_parameters = 5000000  # 1 million learnable parameters
@@ -197,9 +199,8 @@ class MusicModel:
         training_writer = tf.summary.FileWriter(output_path + "/training")
         training_writer.add_graph(sess.graph)
 
-        validation_writer = tf.summary.FileWriter(output_path + "/validation")
-
-        x_train, y_train, sequence_lengths_train = split_data_in_parts(train_data, window_size, step_size, vocabulary_size)
+        x_train, y_train, sequence_lengths_train = split_data_in_parts(train_data, window_size, step_size,
+                                                                       vocabulary_size)
 
         num_training_batches = len(x_train) // batch_size
 
@@ -268,8 +269,7 @@ class MusicModel:
                 best_validation_loss = average_validation_loss
 
                 # Save checkpoint
-                saver = tf.compat.v1.train.Saver()
-                saver.save(sess, ckpt_path + model_name + ".ckpt")
+                save_model(sess, ckpt_path, model_name)
 
                 epochs_no_gain = 0
             elif break_epochs_no_gain >= 1:  # Validation loss was worse. Check if break_epochs_no_gain is on
@@ -299,11 +299,7 @@ class MusicModel:
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
             # Restore session
-            ckpt = tf.train.get_checkpoint_state(ckpt_path)
-            saver = tf.compat.v1.train.Saver()
-            # If there is a correct checkpoint at the path restore it
-            if ckpt and ckpt.model_checkpoint_path:
-                saver.restore(sess, ckpt.model_checkpoint_path)
+            restore_model(sess, ckpt_path)
 
         # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
         writer = tf.summary.FileWriter(output_path + f"/{mode}")

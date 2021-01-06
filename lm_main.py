@@ -12,6 +12,7 @@ from lm_utils import load_data, get_window_indexes, get_input_data_from_indexes,
 from utils import find_optimal_hidden_units
 from utils import print_trainable_variables
 from utils import get_batch
+from utils import save_model, restore_model
 
 from cell_registry import get_cell_information
 
@@ -256,7 +257,7 @@ class LMModel:
 
         print("\nGraph Built...\n")
 
-    def fit(self, training_data, validation_data=None):
+    def fit(self, training_data, validation_data):
         tf_config = tf.ConfigProto()
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
@@ -270,13 +271,8 @@ class LMModel:
         training_writer = tf.summary.FileWriter(output_path + "/training")
         training_writer.add_graph(sess.graph)
 
-        validation_writer = tf.summary.FileWriter(output_path + "/validation")
-
-        # When stateful (maybe in other cases) we want the data to be continuous, so we need them to be exactly one
-        # after the other
-
+        global fixed_batch_size
         if stateful:  # If we are in stateful mode, we need fixed_batch_size, so the state shape stays the same
-            global fixed_batch_size
             fixed_batch_size = True
 
         if stateful or continuous_batches:
@@ -302,6 +298,8 @@ class LMModel:
             start_time = time.time()
 
             state = None
+
+            extra_tasks_for_perfection = not stateful and not continuous_batches
 
             for i in range(num_training_batches):
                 x_batch = get_batch(training_indexes, i, batch_size, fixed_batch_size, continuous_batches)
@@ -349,8 +347,7 @@ class LMModel:
 
                 # To have 100% data covered if we had step_size = window_size // 2 , we need to have full length
                 # values for first batch
-                extra_tasks_for_perfection = not stateful and not continuous_batches and i == 0
-                if extra_tasks_for_perfection:
+                if extra_tasks_for_perfection and i == 0:
                     # Because we went through 2 halves, to have fair average we need extra addition, but we will
                     # have to divide by one more later
                     total_training_perplexity += p
@@ -395,8 +392,7 @@ class LMModel:
                 best_validation_perplexity = average_validation_perplexity
 
                 # Save checkpoint
-                saver = tf.compat.v1.train.Saver()
-                saver.save(sess, ckpt_path + model_name + ".ckpt")
+                save_model(sess, ckpt_path, model_name)
 
                 epochs_no_gain = 0
             elif break_epochs_no_gain >= 1:  # Validation perplexity was worse, check break_epochs_no_gain
@@ -426,11 +422,7 @@ class LMModel:
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
             # Restore session
-            ckpt = tf.train.get_checkpoint_state(ckpt_path)
-            saver = tf.compat.v1.train.Saver()
-            # If there is a correct checkpoint at the path restore it
-            if ckpt and ckpt.model_checkpoint_path:
-                saver.restore(sess, ckpt.model_checkpoint_path)
+            restore_model(sess, ckpt_path)
 
         # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
         writer = tf.summary.FileWriter(output_path + f"/{mode}")
