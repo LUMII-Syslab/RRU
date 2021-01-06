@@ -74,9 +74,9 @@ do_hyperparameter_optimization = False  # bool
 # How many runs should we run hyperparameter optimization
 optimization_runs = 100  # int, >= 1
 # Path, where we will save the model for further evaluating
-ckpt_path = 'ckpt_music/'  # string
+ckpt_path = 'ckpt_mm/'  # string
 # Path, where we will store ours logs
-log_path = 'logdir_music/'  # string
+log_path = 'logdir_mm/'  # string
 # After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)

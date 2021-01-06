@@ -51,9 +51,9 @@ rm -rf simple-examples/
 cd ..
 cd ..
 
-echo "  Downloading music data sets!"
-mkdir -p music
-cd music
+echo "  Downloading music modeling data sets!"
+mkdir -p mm
+cd mm
 
 mkdir -p unchanged
 mkdir -p ready

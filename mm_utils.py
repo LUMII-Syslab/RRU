@@ -5,8 +5,8 @@ import numpy as np
 # Importing os.path so we can check if files and directories exist
 import os.path
 
-downloaded_data_path = "data/music/unchanged/"
-prepared_data_path = "data/music/ready/"
+downloaded_data_path = "data/mm/unchanged/"
+prepared_data_path = "data/mm/ready/"
 supported_data_sets = ["JSB Chorales", "MuseData", "Nottingham", "Piano-midi.de"]
 
 

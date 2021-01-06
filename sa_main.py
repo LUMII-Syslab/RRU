@@ -71,9 +71,9 @@ do_hyperparameter_optimization = False  # bool
 # How many runs should we run hyperparameter optimization
 optimization_runs = 100  # int, >= 1
 # Path, where we will save the model for further evaluating
-ckpt_path = 'ckpt_imdb/'  # string
+ckpt_path = 'ckpt_sa/'  # string
 # Path, where we will store ours logs
-log_path = 'logdir_imdb/'  # string
+log_path = 'logdir_sa/'  # string
 # After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
@@ -91,7 +91,7 @@ if not has_separate_output_size:
 
 # Calculating the path, in which we will store the logs
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")  # We put current time in the name, so it is unique in each run
-output_path = log_path + model_name + '/' + current_time
+output_path = log_path + model_name + '/IMDB/' + current_time  # IMDB while there is only 1 data set
 
 # Don't print TensorFlow messages, that we don't need
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
