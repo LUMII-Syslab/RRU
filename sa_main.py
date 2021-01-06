@@ -264,7 +264,6 @@ class IMDBModel:
 
         # Adding a writer so we can visualize accuracy and loss on TensorBoard
         testing_writer = tf.summary.FileWriter(output_path + "/testing")
-        testing_writer.add_graph(sess.graph)
 
         # Restore session
         ckpt = tf.train.get_checkpoint_state(ckpt_path)

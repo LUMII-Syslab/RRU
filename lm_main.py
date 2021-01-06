@@ -271,7 +271,6 @@ class LMModel:
         training_writer.add_graph(sess.graph)
 
         validation_writer = tf.summary.FileWriter(output_path + "/validation")
-        validation_writer.add_graph(sess.graph)
 
         # When stateful (maybe in other cases) we want the data to be continuous, so we need them to be exactly one
         # after the other
@@ -493,7 +492,6 @@ class LMModel:
 
         # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
         testing_writer = tf.summary.FileWriter(output_path + "/testing")
-        testing_writer.add_graph(sess.graph)
 
         indexes = get_window_indexes(len(data), window_size, window_size // 2)
 

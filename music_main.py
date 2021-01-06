@@ -37,7 +37,7 @@ cell_fn, model_name, has_separate_output_size, _ = get_cell_information(cell_nam
 # Hyperparameters
 # Data parameters
 # Choose on of "JSB Chorales" | "MuseData" | "Nottingham" | "Piano-midi.de" (which data set to test on)
-data_set_name = "JSB Chorales"
+data_set_name = "Nottingham"
 vocabulary_size = None  # We will load this from a pickle file, so changing this here won't do a thing
 window_size = 200  # If you have a lot of resources you can run this on full context size - 160/3780/1793/3623
 step_size = window_size // 2
@@ -45,7 +45,7 @@ batch_size = 16  # Max batch_sizes: JSB Chorales 76; MuseData 124; Nottingham 17
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 shuffle_data = True  # Should we shuffle the samples?
 # Training
-num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
+num_epochs = 2#1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 break_epochs_no_gain = 7  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
 HIDDEN_UNITS = 128 * 3  # This will only be used if the number_of_parameters is None or < 1
 number_of_parameters = 5000000  # 1 million learnable parameters
@@ -198,7 +198,6 @@ class MusicModel:
         training_writer.add_graph(sess.graph)
 
         validation_writer = tf.summary.FileWriter(output_path + "/validation")
-        validation_writer.add_graph(sess.graph)
 
         x_train, y_train, sequence_lengths_train = split_data_in_parts(train_data, window_size, step_size, vocabulary_size)
 
@@ -340,7 +339,6 @@ class MusicModel:
 
         # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
         testing_writer = tf.summary.FileWriter(output_path + "/testing")
-        testing_writer.add_graph(sess.graph)
 
         x_test, y_test, sequence_lengths = split_data_in_parts(data, window_size, window_size, vocabulary_size)
 
