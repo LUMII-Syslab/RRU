@@ -4,7 +4,7 @@ ckpt_imdb
 ckpt_sa
 ckpt_lm
 ckpt_music
-ckpt_music
+ckpt_mm
 logdir_imdb
 logdir_sa
 logdir_lm
