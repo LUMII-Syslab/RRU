@@ -164,3 +164,16 @@ def get_batch(data, current_batch_index, batch_size, fixed_batch_size=True, cont
             batch = data[current_batch_index * batch_size:]
 
     return batch
+
+
+def save_model(sess, ckpt_path, model_name):
+    saver = tf.compat.v1.train.Saver()
+    saver.save(sess, ckpt_path + model_name + ".ckpt")
+
+
+def restore_model(sess, ckpt_path):
+    ckpt = tf.train.get_checkpoint_state(ckpt_path)
+    saver = tf.compat.v1.train.Saver()
+    # If there is a correct checkpoint at the path restore it
+    if ckpt and ckpt.model_checkpoint_path:
+        saver.restore(sess, ckpt.model_checkpoint_path)

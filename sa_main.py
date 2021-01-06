@@ -19,7 +19,7 @@ from cell_registry import get_cell_information
 from hyperopt import hp, tpe, Trials, fmin
 
 # Importing fancier optimizer(s)
-# from RAdam import RAdamOptimizer
+from RAdam import RAdamOptimizer
 from adam_decay import AdamOptimizer_decay
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
@@ -47,6 +47,8 @@ num_classes = 2
 learning_rate = 0.001
 shuffle_data = True
 fixed_batch_size = False
+clip_gradients = True
+clip_multiplier = 5.  # This value matters only if clip_gradients = True
 do_hyperparameter_optimization = False
 
 ckpt_path = 'ckpt_imdb/'
@@ -157,9 +159,13 @@ class IMDBModel:
         # Declare our optimizer, we have to check which one works better.
         # Before: Adam gave better training accuracy and loss, but RMSProp gave better validation accuracy and loss
         # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
-        optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
-                                        L2_decay=0.01,
-                                        decay_vars=decay_vars).minimize(loss)
+        optimizer = RAdamOptimizer(learning_rate=learning_rate,
+                                   L2_decay=0.0,
+                                   decay_vars=decay_vars,
+                                   clip_gradients=clip_gradients, clip_multiplier=clip_multiplier).minimize(loss)
+        # optimizer = AdamOptimizer_decay(learning_rate=learning_rate,
+        #                                L2_decay=0.01,
+        #                                decay_vars=decay_vars).minimize(loss)
         # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 

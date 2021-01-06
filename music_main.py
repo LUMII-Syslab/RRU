@@ -57,6 +57,8 @@ do_hyperparameter_optimization = False
 middle_layer_size_multiplier = 2
 # gate_bias = 1
 dropout_rate = 0.5
+clip_gradients = True
+clip_multiplier = 1.5  # This value matters only if clip_gradients = True
 
 ckpt_path = 'ckpt_music/'
 log_path = 'logdir_music/'
@@ -164,7 +166,7 @@ class MusicModel:
         optimizer = RAdamOptimizer(learning_rate=learning_rate,
                                    L2_decay=0.0,
                                    decay_vars=decay_vars,
-                                   clip_gradients=True, clip_multiplier=1.5).minimize(loss)
+                                   clip_gradients=clip_gradients, clip_multiplier=clip_multiplier).minimize(loss)
         # optimizer = RAdamOptimizer(learning_rate=learning_rate, L2_decay=0.0, epsilon=1e-8).minimize(loss)
         # optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(loss)
 
