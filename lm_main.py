@@ -260,317 +260,317 @@ class LMModel:
         tf_config = tf.ConfigProto()
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
-        with tf.Session(config=tf_config) as sess:
-            print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
+        sess = tf.Session(config=tf_config)
+        print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
 
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-            # Adding writers so we can visualize accuracy, loss, etc. on TensorBoard
-            merged_summary = tf.summary.merge_all()
-            training_writer = tf.summary.FileWriter(output_path + "/training")
-            training_writer.add_graph(sess.graph)
+        # Adding writers so we can visualize accuracy, loss, etc. on TensorBoard
+        merged_summary = tf.summary.merge_all()
+        training_writer = tf.summary.FileWriter(output_path + "/training")
+        training_writer.add_graph(sess.graph)
 
-            validation_writer = tf.summary.FileWriter(output_path + "/validation")
-            validation_writer.add_graph(sess.graph)
+        validation_writer = tf.summary.FileWriter(output_path + "/validation")
+        validation_writer.add_graph(sess.graph)
 
-            # When stateful (maybe in other cases) we want the data to be continuous, so we need them to be exactly one
-            # after the other
+        # When stateful (maybe in other cases) we want the data to be continuous, so we need them to be exactly one
+        # after the other
 
-            if stateful:  # If we are in stateful mode, we need fixed_batch_size, so the state shape stays the same
-                global fixed_batch_size
-                fixed_batch_size = True
+        if stateful:  # If we are in stateful mode, we need fixed_batch_size, so the state shape stays the same
+            global fixed_batch_size
+            fixed_batch_size = True
 
-            if stateful or continuous_batches:
-                training_indexes = get_window_indexes(len(training_data), window_size, window_size)
-            else:
-                training_indexes = get_window_indexes(len(training_data), window_size, window_size // 2)
+        if stateful or continuous_batches:
+            training_indexes = get_window_indexes(len(training_data), window_size, window_size)
+        else:
+            training_indexes = get_window_indexes(len(training_data), window_size, window_size // 2)
 
-            num_training_batches = len(training_indexes) // batch_size
+        num_training_batches = len(training_indexes) // batch_size
 
-            # Variables that help implement the early stopping if no validation perplexity decrease is observed
-            epochs_no_gain = 0
-            best_validation_perplexity = None
+        # Variables that help implement the early stopping if no validation perplexity decrease is observed
+        epochs_no_gain = 0
+        best_validation_perplexity = None
 
-            for epoch in range(num_epochs):
-                print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
+        for epoch in range(num_epochs):
+            print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
 
-                if shuffle_data:
-                    training_indexes = shuffle(training_indexes)
+            if shuffle_data:
+                training_indexes = shuffle(training_indexes)
 
-                total_training_perplexity = 0
-                total_training_accuracy = 0
-
-                start_time = time.time()
-
-                state = None
-
-                for i in range(num_training_batches):
-                    x_batch = get_batch(training_indexes, i, batch_size, fixed_batch_size, continuous_batches)
-
-                    if stateful and (np.random.uniform() < zero_state_chance or i == 0):
-                        state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
-
-                    # Now we have batch of integers to look in text from
-                    x_batch, y_batch = get_input_data_from_indexes(training_data, x_batch, window_size)
-
-                    if stateful:
-                        feed_dict = {
-                            self.x: x_batch,
-                            self.y: y_batch,
-                            self.training: True,
-                            self.outer_dropout_rate: outer_dropout,
-                            self.initial_state: state
-                        }
-                    else:
-                        feed_dict = {
-                            self.x: x_batch,
-                            self.y: y_batch,
-                            self.training: True,
-                            self.outer_dropout_rate: outer_dropout
-                        }
-
-                    # Do we need to fetch the full length stats
-                    need_full = stateful or continuous_batches or i == 0
-
-                    if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                        s, _, last_state, p, a = sess.run([merged_summary,
-                                                           self.optimizer,
-                                                           self.state,
-                                                           self.perplexity if need_full else self.half_perplexity,
-                                                           self.accuracy if need_full else self.half_accuracy],
-                                                          feed_dict=feed_dict)
-
-                        training_writer.add_summary(s, i + epoch * num_training_batches)
-                    else:
-                        _, last_state, p, a = sess.run([self.optimizer,
-                                                        self.state,
-                                                        self.perplexity if need_full else self.half_perplexity,
-                                                        self.accuracy if need_full else self.half_accuracy],
-                                                       feed_dict=feed_dict)
-
-                    # To have 100% data covered if we had step_size = window_size // 2 , we need to have full length
-                    # values for first batch
-                    extra_tasks_for_perfection = not stateful and not continuous_batches and i == 0
-                    if extra_tasks_for_perfection:
-                        # Because we went through 2 halves, to have fair average we need extra addition, but we will
-                        # have to divide by one more later
-                        total_training_perplexity += p
-                        total_training_accuracy += a
-
-                    state = last_state
-
-                    total_training_perplexity += p
-                    total_training_accuracy += a
-
-                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                            or i == num_training_batches - 1:
-                        print(f"Step {i + 1} of {num_training_batches} | "
-                              f"Perplexity: {p}, "
-                              f"Accuracy: {a}, "
-                              f"Time from start: {time.time() - start_time}")
-
-                statistics_count = (num_training_batches + 1) if extra_tasks_for_perfection else num_training_batches
-                average_training_perplexity = total_training_perplexity / statistics_count
-                average_training_accuracy = total_training_accuracy / statistics_count
-                print(f"   Epoch {epoch + 1} | "
-                      f"Average perplexity: {average_training_perplexity}, "
-                      f"Average accuracy: {average_training_accuracy}, "
-                      f"Time spent: {time.time() - start_time}")
-
-                epoch_perplexity_summary = tf.Summary()
-                epoch_perplexity_summary.value.add(tag='epoch_perplexity', simple_value=average_training_perplexity)
-                training_writer.add_summary(epoch_perplexity_summary, epoch + 1)
-
-                epoch_accuracy_summary = tf.Summary()
-                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_training_accuracy)
-                training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
-                training_writer.flush()
-
-                if validation_data is not None:
-                    print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
-
-                    validation_indexes = get_window_indexes(len(validation_data), window_size, window_size // 2)
-
-                    num_validation_batches = len(validation_indexes) // batch_size
-
-                    total_validation_perplexity = 0
-                    total_validation_accuracy = 0
-
-                    start_time = time.time()
-
-                    for i in range(num_validation_batches):
-                        x_batch = get_batch(validation_indexes, i, batch_size, fixed_batch_size, continuous_batches)
-
-                        if stateful:
-                            state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
-
-                        # Now we have batch of integers to look in text from
-                        x_batch, y_batch = get_input_data_from_indexes(validation_data, x_batch, window_size)
-
-                        if stateful:
-                            feed_dict = {
-                                self.x: x_batch,
-                                self.y: y_batch,
-                                self.training: False,
-                                self.outer_dropout_rate: 0.,
-                                self.initial_state: state
-                            }
-                        else:
-                            feed_dict = {
-                                self.x: x_batch,
-                                self.y: y_batch,
-                                self.training: False,
-                                self.outer_dropout_rate: 0.
-                            }
-
-                        if i == 0:  # To have 100% data covered we need to have full length values for first batch
-                            p, a = sess.run([self.perplexity, self.accuracy], feed_dict=feed_dict)
-                            # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
-                            p = 2 * p
-                            a = 2 * a
-                        else:
-                            p, a = sess.run([self.half_perplexity, self.half_accuracy], feed_dict=feed_dict)
-
-                        total_validation_perplexity += p
-                        total_validation_accuracy += a
-
-                        if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                                or i == num_validation_batches - 1:
-                            print(f"Step {i + 1} of {num_validation_batches} | "
-                                  f"Average perplexity: {total_validation_perplexity / (i + 2)}, "
-                                  f"Average accuracy: {total_validation_accuracy / (i + 2)}, "
-                                  f"Time from start: {time.time() - start_time}")
-
-                    # + 1 because we counted the 1st batch twice
-                    average_validation_perplexity = total_validation_perplexity / (num_validation_batches + 1)
-                    average_validation_accuracy = total_validation_accuracy / (num_validation_batches + 1)
-                    print(f"Final validation stats | "
-                          f"Average perplexity: {average_validation_perplexity}, "
-                          f"Average accuracy: {average_validation_accuracy}, "
-                          f"Time spent: {time.time() - start_time}")
-
-                    epoch_perplexity_summary = tf.Summary()
-                    epoch_perplexity_summary.value.add(tag='epoch_perplexity', simple_value=average_validation_perplexity)
-                    validation_writer.add_summary(epoch_perplexity_summary, epoch + 1)
-
-                    epoch_accuracy_summary = tf.Summary()
-                    epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_validation_accuracy)
-                    validation_writer.add_summary(epoch_accuracy_summary, epoch + 1)
-                    validation_writer.flush()
-
-                    # Training and validation for epoch is done, check if validation perplexity was better this epoch
-                    if best_validation_perplexity is None or average_validation_perplexity < best_validation_perplexity:
-                        print(f"&&& New best validation perplexity - before: {best_validation_perplexity};"
-                              f" after: {average_validation_perplexity} - saving model...")
-
-                        best_validation_perplexity = average_validation_perplexity
-
-                        # Save checkpoint
-                        saver = tf.compat.v1.train.Saver()
-                        saver.save(sess, ckpt_path + model_name + ".ckpt")
-
-                        epochs_no_gain = 0
-                    elif break_epochs_no_gain >= 1:  # Validation perplexity was worse, check break_epochs_no_gain
-                        epochs_no_gain += 1
-
-                        print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs,"
-                              f" breaking at {break_epochs_no_gain} epochs.")
-
-                        if epochs_no_gain == break_epochs_no_gain:
-                            print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
-                            break  # Probably return would do the same thing (for now)
-            # Training ends here
-            '''We used to save here - model saved after the last epoch'''
-            # Save checkpoint
-            # saver = tf.compat.v1.train.Saver()
-            # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model
-
-    def evaluate(self, data):
-        with tf.Session() as sess:
-            print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
-
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
-
-            # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
-            testing_writer = tf.summary.FileWriter(output_path + "/testing")
-            testing_writer.add_graph(sess.graph)
-
-            indexes = get_window_indexes(len(data), window_size, window_size // 2)
-
-            # Restore session
-            ckpt = tf.train.get_checkpoint_state(ckpt_path)
-            saver = tf.compat.v1.train.Saver()
-            # If there is a correct checkpoint at the path restore it
-            if ckpt and ckpt.model_checkpoint_path:
-                saver.restore(sess, ckpt.model_checkpoint_path)
-
-            num_batches = len(indexes) // batch_size
-
-            total_perplexity = 0
-            total_accuracy = 0
+            total_training_perplexity = 0
+            total_training_accuracy = 0
 
             start_time = time.time()
 
-            for i in range(num_batches):
-                x_batch = get_batch(indexes, i, batch_size, fixed_batch_size, continuous_batches)
+            state = None
 
-                if stateful:
+            for i in range(num_training_batches):
+                x_batch = get_batch(training_indexes, i, batch_size, fixed_batch_size, continuous_batches)
+
+                if stateful and (np.random.uniform() < zero_state_chance or i == 0):
                     state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
 
                 # Now we have batch of integers to look in text from
-                x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
+                x_batch, y_batch = get_input_data_from_indexes(training_data, x_batch, window_size)
 
                 if stateful:
                     feed_dict = {
                         self.x: x_batch,
                         self.y: y_batch,
-                        self.training: False,
-                        self.outer_dropout_rate: 0.,
+                        self.training: True,
+                        self.outer_dropout_rate: outer_dropout,
                         self.initial_state: state
                     }
                 else:
                     feed_dict = {
                         self.x: x_batch,
                         self.y: y_batch,
-                        self.training: False,
-                        self.outer_dropout_rate: 0.
+                        self.training: True,
+                        self.outer_dropout_rate: outer_dropout
                     }
 
-                if i == 0:  # To have 100% data covered we need to have full length values for first batch
-                    p, a = sess.run([self.perplexity, self.accuracy], feed_dict=feed_dict)
-                    # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
-                    p = 2 * p
-                    a = 2 * a
-                else:
-                    p, a = sess.run([self.half_perplexity, self.half_accuracy], feed_dict=feed_dict)
+                # Do we need to fetch the full length stats
+                need_full = stateful or continuous_batches or i == 0
 
-                total_perplexity += p
-                total_accuracy += a
+                if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
+                    s, _, last_state, p, a = sess.run([merged_summary,
+                                                       self.optimizer,
+                                                       self.state,
+                                                       self.perplexity if need_full else self.half_perplexity,
+                                                       self.accuracy if need_full else self.half_accuracy],
+                                                      feed_dict=feed_dict)
+
+                    training_writer.add_summary(s, i + epoch * num_training_batches)
+                else:
+                    _, last_state, p, a = sess.run([self.optimizer,
+                                                    self.state,
+                                                    self.perplexity if need_full else self.half_perplexity,
+                                                    self.accuracy if need_full else self.half_accuracy],
+                                                   feed_dict=feed_dict)
+
+                # To have 100% data covered if we had step_size = window_size // 2 , we need to have full length
+                # values for first batch
+                extra_tasks_for_perfection = not stateful and not continuous_batches and i == 0
+                if extra_tasks_for_perfection:
+                    # Because we went through 2 halves, to have fair average we need extra addition, but we will
+                    # have to divide by one more later
+                    total_training_perplexity += p
+                    total_training_accuracy += a
+
+                state = last_state
+
+                total_training_perplexity += p
+                total_training_accuracy += a
 
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                        or i == num_batches - 1:
-                    print(f"Step {i + 1} of {num_batches} | "
-                          f"Average perplexity: {total_perplexity / (i + 2)}, "
-                          f"Average accuracy: {total_accuracy / (i + 2)}, "
+                        or i == num_training_batches - 1:
+                    print(f"Step {i + 1} of {num_training_batches} | "
+                          f"Perplexity: {p}, "
+                          f"Accuracy: {a}, "
                           f"Time from start: {time.time() - start_time}")
-            average_perplexity = total_perplexity / (num_batches + 1)
-            average_accuracy = total_accuracy / (num_batches + 1)
-            print(f"Final testing stats | "
-                  f"Average perplexity: {average_perplexity}, "
-                  f"Average accuracy: {average_accuracy}, "
+
+            statistics_count = (num_training_batches + 1) if extra_tasks_for_perfection else num_training_batches
+            average_training_perplexity = total_training_perplexity / statistics_count
+            average_training_accuracy = total_training_accuracy / statistics_count
+            print(f"   Epoch {epoch + 1} | "
+                  f"Average perplexity: {average_training_perplexity}, "
+                  f"Average accuracy: {average_training_accuracy}, "
                   f"Time spent: {time.time() - start_time}")
 
-            # We add this to TensorBoard so we don't have to dig in console logs and nohups
-            testing_perplexity_summary = tf.Summary()
-            testing_perplexity_summary.value.add(tag='testing_perplexity', simple_value=average_perplexity)
-            testing_writer.add_summary(testing_perplexity_summary, 1)
+            epoch_perplexity_summary = tf.Summary()
+            epoch_perplexity_summary.value.add(tag='epoch_perplexity', simple_value=average_training_perplexity)
+            training_writer.add_summary(epoch_perplexity_summary, epoch + 1)
 
-            testing_accuracy_summary = tf.Summary()
-            testing_accuracy_summary.value.add(tag='testing_accuracy', simple_value=average_accuracy)
-            testing_writer.add_summary(testing_accuracy_summary, 1)
-            testing_writer.flush()
+            epoch_accuracy_summary = tf.Summary()
+            epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_training_accuracy)
+            training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+            training_writer.flush()
 
-            return average_perplexity
+            if validation_data is not None:
+                print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
+
+                validation_indexes = get_window_indexes(len(validation_data), window_size, window_size // 2)
+
+                num_validation_batches = len(validation_indexes) // batch_size
+
+                total_validation_perplexity = 0
+                total_validation_accuracy = 0
+
+                start_time = time.time()
+
+                for i in range(num_validation_batches):
+                    x_batch = get_batch(validation_indexes, i, batch_size, fixed_batch_size, continuous_batches)
+
+                    if stateful:
+                        state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
+
+                    # Now we have batch of integers to look in text from
+                    x_batch, y_batch = get_input_data_from_indexes(validation_data, x_batch, window_size)
+
+                    if stateful:
+                        feed_dict = {
+                            self.x: x_batch,
+                            self.y: y_batch,
+                            self.training: False,
+                            self.outer_dropout_rate: 0.,
+                            self.initial_state: state
+                        }
+                    else:
+                        feed_dict = {
+                            self.x: x_batch,
+                            self.y: y_batch,
+                            self.training: False,
+                            self.outer_dropout_rate: 0.
+                        }
+
+                    if i == 0:  # To have 100% data covered we need to have full length values for first batch
+                        p, a = sess.run([self.perplexity, self.accuracy], feed_dict=feed_dict)
+                        # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
+                        p = 2 * p
+                        a = 2 * a
+                    else:
+                        p, a = sess.run([self.half_perplexity, self.half_accuracy], feed_dict=feed_dict)
+
+                    total_validation_perplexity += p
+                    total_validation_accuracy += a
+
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                            or i == num_validation_batches - 1:
+                        print(f"Step {i + 1} of {num_validation_batches} | "
+                              f"Average perplexity: {total_validation_perplexity / (i + 2)}, "
+                              f"Average accuracy: {total_validation_accuracy / (i + 2)}, "
+                              f"Time from start: {time.time() - start_time}")
+
+                # + 1 because we counted the 1st batch twice
+                average_validation_perplexity = total_validation_perplexity / (num_validation_batches + 1)
+                average_validation_accuracy = total_validation_accuracy / (num_validation_batches + 1)
+                print(f"Final validation stats | "
+                      f"Average perplexity: {average_validation_perplexity}, "
+                      f"Average accuracy: {average_validation_accuracy}, "
+                      f"Time spent: {time.time() - start_time}")
+
+                epoch_perplexity_summary = tf.Summary()
+                epoch_perplexity_summary.value.add(tag='epoch_perplexity', simple_value=average_validation_perplexity)
+                validation_writer.add_summary(epoch_perplexity_summary, epoch + 1)
+
+                epoch_accuracy_summary = tf.Summary()
+                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_validation_accuracy)
+                validation_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+                validation_writer.flush()
+
+                # Training and validation for epoch is done, check if validation perplexity was better this epoch
+                if best_validation_perplexity is None or average_validation_perplexity < best_validation_perplexity:
+                    print(f"&&& New best validation perplexity - before: {best_validation_perplexity};"
+                          f" after: {average_validation_perplexity} - saving model...")
+
+                    best_validation_perplexity = average_validation_perplexity
+
+                    # Save checkpoint
+                    saver = tf.compat.v1.train.Saver()
+                    saver.save(sess, ckpt_path + model_name + ".ckpt")
+
+                    epochs_no_gain = 0
+                elif break_epochs_no_gain >= 1:  # Validation perplexity was worse, check break_epochs_no_gain
+                    epochs_no_gain += 1
+
+                    print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs,"
+                          f" breaking at {break_epochs_no_gain} epochs.")
+
+                    if epochs_no_gain == break_epochs_no_gain:
+                        print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
+                        break  # Probably return would do the same thing (for now)
+        # Training ends here
+        '''We used to save here - model saved after the last epoch'''
+        # Save checkpoint
+        # saver = tf.compat.v1.train.Saver()
+        # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model
+
+    def evaluate(self, data):
+        sess = tf.Session()
+        print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
+
+        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+
+        # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
+        testing_writer = tf.summary.FileWriter(output_path + "/testing")
+        testing_writer.add_graph(sess.graph)
+
+        indexes = get_window_indexes(len(data), window_size, window_size // 2)
+
+        # Restore session
+        ckpt = tf.train.get_checkpoint_state(ckpt_path)
+        saver = tf.compat.v1.train.Saver()
+        # If there is a correct checkpoint at the path restore it
+        if ckpt and ckpt.model_checkpoint_path:
+            saver.restore(sess, ckpt.model_checkpoint_path)
+
+        num_batches = len(indexes) // batch_size
+
+        total_perplexity = 0
+        total_accuracy = 0
+
+        start_time = time.time()
+
+        for i in range(num_batches):
+            x_batch = get_batch(indexes, i, batch_size, fixed_batch_size, continuous_batches)
+
+            if stateful:
+                state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
+
+            # Now we have batch of integers to look in text from
+            x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
+
+            if stateful:
+                feed_dict = {
+                    self.x: x_batch,
+                    self.y: y_batch,
+                    self.training: False,
+                    self.outer_dropout_rate: 0.,
+                    self.initial_state: state
+                }
+            else:
+                feed_dict = {
+                    self.x: x_batch,
+                    self.y: y_batch,
+                    self.training: False,
+                    self.outer_dropout_rate: 0.
+                }
+
+            if i == 0:  # To have 100% data covered we need to have full length values for first batch
+                p, a = sess.run([self.perplexity, self.accuracy], feed_dict=feed_dict)
+                # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
+                p = 2 * p
+                a = 2 * a
+            else:
+                p, a = sess.run([self.half_perplexity, self.half_accuracy], feed_dict=feed_dict)
+
+            total_perplexity += p
+            total_accuracy += a
+
+            if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                    or i == num_batches - 1:
+                print(f"Step {i + 1} of {num_batches} | "
+                      f"Average perplexity: {total_perplexity / (i + 2)}, "
+                      f"Average accuracy: {total_accuracy / (i + 2)}, "
+                      f"Time from start: {time.time() - start_time}")
+        average_perplexity = total_perplexity / (num_batches + 1)
+        average_accuracy = total_accuracy / (num_batches + 1)
+        print(f"Final testing stats | "
+              f"Average perplexity: {average_perplexity}, "
+              f"Average accuracy: {average_accuracy}, "
+              f"Time spent: {time.time() - start_time}")
+
+        # We add this to TensorBoard so we don't have to dig in console logs and nohups
+        testing_perplexity_summary = tf.Summary()
+        testing_perplexity_summary.value.add(tag='testing_perplexity', simple_value=average_perplexity)
+        testing_writer.add_summary(testing_perplexity_summary, 1)
+
+        testing_accuracy_summary = tf.Summary()
+        testing_accuracy_summary.value.add(tag='testing_accuracy', simple_value=average_accuracy)
+        testing_writer.add_summary(testing_accuracy_summary, 1)
+        testing_writer.flush()
+
+        return average_perplexity
 
 
 if __name__ == '__main__':  # Main function

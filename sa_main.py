@@ -182,98 +182,22 @@ class IMDBModel:
         print("\nGraph Built...\n")
 
     def fit(self, x_train, y_train):
-        with tf.Session() as sess:
-            print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
+        sess = tf.Session()
+        print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
 
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-            # Adding a writer so we can visualize accuracy and loss on TensorBoard
-            merged_summary = tf.summary.merge_all()
-            training_writer = tf.summary.FileWriter(output_path + "/training")
-            training_writer.add_graph(sess.graph)
+        # Adding a writer so we can visualize accuracy and loss on TensorBoard
+        merged_summary = tf.summary.merge_all()
+        training_writer = tf.summary.FileWriter(output_path + "/training")
+        training_writer.add_graph(sess.graph)
 
-            for epoch in range(num_epochs):
-                print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
-                if shuffle_data:
-                    x_train, y_train = shuffle(x_train, y_train)
+        for epoch in range(num_epochs):
+            print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
+            if shuffle_data:
+                x_train, y_train = shuffle(x_train, y_train)
 
-                num_batches = len(x_train) // batch_size
-
-                total_loss = 0
-                total_accuracy = 0
-
-                start_time = time.time()
-
-                for i in range(num_batches):
-                    x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
-                    y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
-
-                    sequence_lengths = get_sequence_lengths(x_batch)
-
-                    feed_dict = {
-                        self.x: x_batch,
-                        self.y: y_batch,
-                        self.training: True,
-                        self.sequence_length: sequence_lengths
-                    }
-
-                    if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                        s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
-                                              feed_dict=feed_dict)
-
-                        training_writer.add_summary(s, i + epoch * num_batches)
-                    else:
-                        _, l, a = sess.run([self.optimizer, self.loss, self.accuracy],
-                                           feed_dict=feed_dict)
-
-                    total_loss += l
-                    total_accuracy += a
-
-                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                            or i == num_batches - 1:
-                        print(f"Step {i + 1} of {num_batches} | "
-                              f"Loss: {l}, "
-                              f"Accuracy: {a}, "
-                              f"Time from start: {time.time() - start_time}")
-
-                average_loss = total_loss / num_batches
-                average_accuracy = total_accuracy / num_batches
-                print(f"   Epoch {epoch + 1} | "
-                      f"Average loss: {average_loss}, "
-                      f"Average accuracy: {average_accuracy}, "
-                      f"Time spent: {time.time() - start_time}")
-
-                epoch_loss_summary = tf.Summary()
-                epoch_loss_summary.value.add(tag='epoch_loss', simple_value=average_loss)
-                training_writer.add_summary(epoch_loss_summary, epoch + 1)
-
-                epoch_accuracy_summary = tf.Summary()
-                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_accuracy)
-                training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
-                training_writer.flush()
-            # Training ends here
-            # Save checkpoint
-            saver = tf.compat.v1.train.Saver()
-            saver.save(sess, ckpt_path + model_name + ".ckpt")
-
-    def evaluate(self, x_test, y_test):
-        with tf.Session() as sess:
-            print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
-
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
-
-            # Adding a writer so we can visualize accuracy and loss on TensorBoard
-            testing_writer = tf.summary.FileWriter(output_path + "/testing")
-            testing_writer.add_graph(sess.graph)
-
-            # Restore session
-            ckpt = tf.train.get_checkpoint_state(ckpt_path)
-            saver = tf.compat.v1.train.Saver()
-            # If there is a correct checkpoint at the path restore it
-            if ckpt and ckpt.model_checkpoint_path:
-                saver.restore(sess, ckpt.model_checkpoint_path)
-
-            num_batches = len(x_test) // batch_size
+            num_batches = len(x_train) // batch_size
 
             total_loss = 0
             total_accuracy = 0
@@ -281,15 +205,26 @@ class IMDBModel:
             start_time = time.time()
 
             for i in range(num_batches):
-                x_batch = get_batch(x_test, i, batch_size, fixed_batch_size)
-                y_batch = get_batch(y_test, i, batch_size, fixed_batch_size)
+                x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
+                y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
 
                 sequence_lengths = get_sequence_lengths(x_batch)
 
-                l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch,
-                                                                       self.y: y_batch,
-                                                                       self.training: False,
-                                                                       self.sequence_length: sequence_lengths})
+                feed_dict = {
+                    self.x: x_batch,
+                    self.y: y_batch,
+                    self.training: True,
+                    self.sequence_length: sequence_lengths
+                }
+
+                if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
+                    s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
+                                          feed_dict=feed_dict)
+
+                    training_writer.add_summary(s, i + epoch * num_batches)
+                else:
+                    _, l, a = sess.run([self.optimizer, self.loss, self.accuracy],
+                                       feed_dict=feed_dict)
 
                 total_loss += l
                 total_accuracy += a
@@ -297,28 +232,93 @@ class IMDBModel:
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                         or i == num_batches - 1:
                     print(f"Step {i + 1} of {num_batches} | "
-                          f"Average loss: {total_loss / (i + 1)}, "
-                          f"Average accuracy: {total_accuracy / (i + 1)}, "
+                          f"Loss: {l}, "
+                          f"Accuracy: {a}, "
                           f"Time from start: {time.time() - start_time}")
 
             average_loss = total_loss / num_batches
             average_accuracy = total_accuracy / num_batches
-            print(f"Final testing stats | "
+            print(f"   Epoch {epoch + 1} | "
                   f"Average loss: {average_loss}, "
                   f"Average accuracy: {average_accuracy}, "
                   f"Time spent: {time.time() - start_time}")
 
-            # We add this to TensorBoard so we don't have to dig in console logs and nohups
-            testing_loss_summary = tf.Summary()
-            testing_loss_summary.value.add(tag='testing_loss', simple_value=average_loss)
-            testing_writer.add_summary(testing_loss_summary, 1)
+            epoch_loss_summary = tf.Summary()
+            epoch_loss_summary.value.add(tag='epoch_loss', simple_value=average_loss)
+            training_writer.add_summary(epoch_loss_summary, epoch + 1)
 
-            testing_accuracy_summary = tf.Summary()
-            testing_accuracy_summary.value.add(tag='testing_accuracy', simple_value=average_accuracy)
-            testing_writer.add_summary(testing_accuracy_summary, 1)
-            testing_writer.flush()
+            epoch_accuracy_summary = tf.Summary()
+            epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_accuracy)
+            training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+            training_writer.flush()
+        # Training ends here
+        # Save checkpoint
+        saver = tf.compat.v1.train.Saver()
+        saver.save(sess, ckpt_path + model_name + ".ckpt")
 
-            return average_accuracy
+    def evaluate(self, x_test, y_test):
+        sess = tf.Session()
+        print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
+
+        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+
+        # Adding a writer so we can visualize accuracy and loss on TensorBoard
+        testing_writer = tf.summary.FileWriter(output_path + "/testing")
+        testing_writer.add_graph(sess.graph)
+
+        # Restore session
+        ckpt = tf.train.get_checkpoint_state(ckpt_path)
+        saver = tf.compat.v1.train.Saver()
+        # If there is a correct checkpoint at the path restore it
+        if ckpt and ckpt.model_checkpoint_path:
+            saver.restore(sess, ckpt.model_checkpoint_path)
+
+        num_batches = len(x_test) // batch_size
+
+        total_loss = 0
+        total_accuracy = 0
+
+        start_time = time.time()
+
+        for i in range(num_batches):
+            x_batch = get_batch(x_test, i, batch_size, fixed_batch_size)
+            y_batch = get_batch(y_test, i, batch_size, fixed_batch_size)
+
+            sequence_lengths = get_sequence_lengths(x_batch)
+
+            l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch,
+                                                                   self.y: y_batch,
+                                                                   self.training: False,
+                                                                   self.sequence_length: sequence_lengths})
+
+            total_loss += l
+            total_accuracy += a
+
+            if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                    or i == num_batches - 1:
+                print(f"Step {i + 1} of {num_batches} | "
+                      f"Average loss: {total_loss / (i + 1)}, "
+                      f"Average accuracy: {total_accuracy / (i + 1)}, "
+                      f"Time from start: {time.time() - start_time}")
+
+        average_loss = total_loss / num_batches
+        average_accuracy = total_accuracy / num_batches
+        print(f"Final testing stats | "
+              f"Average loss: {average_loss}, "
+              f"Average accuracy: {average_accuracy}, "
+              f"Time spent: {time.time() - start_time}")
+
+        # We add this to TensorBoard so we don't have to dig in console logs and nohups
+        testing_loss_summary = tf.Summary()
+        testing_loss_summary.value.add(tag='testing_loss', simple_value=average_loss)
+        testing_writer.add_summary(testing_loss_summary, 1)
+
+        testing_accuracy_summary = tf.Summary()
+        testing_accuracy_summary.value.add(tag='testing_accuracy', simple_value=average_accuracy)
+        testing_writer.add_summary(testing_accuracy_summary, 1)
+        testing_writer.flush()
+
+        return average_accuracy
 
 
 def parse_args():  # Parse arguments. Currently not used, we will need to write it differently later.

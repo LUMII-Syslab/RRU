@@ -188,179 +188,40 @@ class MusicModel:
         tf_config = tf.ConfigProto()
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
-        with tf.Session(config=tf_config) as sess:
-            print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+        sess = tf.Session(config=tf_config)
+        print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
+        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-            # Adding a writer so we can visualize accuracy and loss on TensorBoard
-            merged_summary = tf.summary.merge_all()
-            training_writer = tf.summary.FileWriter(output_path + "/training")
-            training_writer.add_graph(sess.graph)
+        # Adding a writer so we can visualize accuracy and loss on TensorBoard
+        merged_summary = tf.summary.merge_all()
+        training_writer = tf.summary.FileWriter(output_path + "/training")
+        training_writer.add_graph(sess.graph)
 
-            validation_writer = tf.summary.FileWriter(output_path + "/validation")
-            validation_writer.add_graph(sess.graph)
+        validation_writer = tf.summary.FileWriter(output_path + "/validation")
+        validation_writer.add_graph(sess.graph)
 
-            x_train, y_train, sequence_lengths_train = split_data_in_parts(train_data, window_size, step_size, vocabulary_size)
+        x_train, y_train, sequence_lengths_train = split_data_in_parts(train_data, window_size, step_size, vocabulary_size)
 
-            num_training_batches = len(x_train) // batch_size
+        num_training_batches = len(x_train) // batch_size
 
-            # Variables that help implement the early stopping if no validation loss decrease is observed
-            epochs_no_gain = 0
-            best_validation_loss = None
+        # Variables that help implement the early stopping if no validation loss decrease is observed
+        epochs_no_gain = 0
+        best_validation_loss = None
 
-            for epoch in range(num_epochs):
-                print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
+        for epoch in range(num_epochs):
+            print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
 
-                if shuffle_data:
-                    x_train, y_train, sequence_lengths_train = shuffle(x_train, y_train, sequence_lengths_train)  # Check if it this shuffles correctly maybe
+            if shuffle_data:
+                x_train, y_train, sequence_lengths_train = shuffle(x_train, y_train, sequence_lengths_train)  # Check if it this shuffles correctly maybe
 
-                total_training_loss = 0
-
-                start_time = time.time()
-
-                for i in range(num_training_batches):
-                    x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
-                    y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
-                    sequence_length_batch = get_batch(sequence_lengths_train, i, batch_size, fixed_batch_size)
-
-                    sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
-                                                                           sequence_length_batch)
-
-                    feed_dict = {
-                        self.x: x_batch,
-                        self.y: y_batch,
-                        self.training: True,
-                        self.sequence_length_matrix: sequence_length_matrix
-                    }
-
-                    if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                        s, _, l = sess.run([merged_summary, self.optimizer, self.loss], feed_dict=feed_dict)
-
-                        training_writer.add_summary(s, i + epoch * num_training_batches)
-                    else:
-                        _, l = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
-
-                    total_training_loss += l
-
-                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                            or i == num_training_batches - 1:
-                        print(f"Step {i + 1} of {num_training_batches} | "
-                              f"Loss: {l}, "
-                              f"Time from start: {time.time() - start_time}")
-
-                average_training_loss = total_training_loss / num_training_batches
-                print(f"   Epoch {epoch + 1} | "
-                      f"Average loss: {average_training_loss}, "
-                      f"Time spent: {time.time() - start_time}")
-
-                epoch_nll_summary = tf.Summary()
-                epoch_nll_summary.value.add(tag='epoch_nll', simple_value=average_training_loss)
-                training_writer.add_summary(epoch_nll_summary, epoch + 1)
-                training_writer.flush()
-
-                if valid_data is not None:
-                    print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
-
-                    x_valid, y_valid, sequence_lengths_valid = split_data_in_parts(valid_data, window_size, window_size, vocabulary_size)
-
-                    num_validation_batches = len(x_valid) // batch_size
-
-                    total_validation_loss = 0
-
-                    start_time = time.time()
-
-                    for i in range(num_validation_batches):
-                        x_batch = get_batch(x_valid, i, batch_size, fixed_batch_size)
-                        y_batch = get_batch(y_valid, i, batch_size, fixed_batch_size)
-                        sequence_length_batch = get_batch(sequence_lengths_valid, i, batch_size, fixed_batch_size)
-
-                        sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
-                                                                               sequence_length_batch)
-
-                        feed_dict = {
-                            self.x: x_batch,
-                            self.y: y_batch,
-                            self.training: False,
-                            self.sequence_length_matrix: sequence_length_matrix
-                        }
-
-                        l = sess.run(self.loss, feed_dict=feed_dict)
-
-                        total_validation_loss += l
-
-                        if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                                or i == num_validation_batches - 1:
-                            print(f"Step {i + 1} of {num_validation_batches} | "
-                                  f"Average loss: {total_validation_loss / (i + 1)}, "
-                                  f"Time from start: {time.time() - start_time}")
-
-                    average_validation_loss = total_validation_loss / num_validation_batches
-                    print(f"Final validation stats | "
-                          f"Average loss: {average_validation_loss}, "
-                          f"Time spent: {time.time() - start_time}")
-
-                    epoch_nll_summary = tf.Summary()
-                    epoch_nll_summary.value.add(tag='epoch_nll', simple_value=average_validation_loss)
-                    validation_writer.add_summary(epoch_nll_summary, epoch + 1)
-                    validation_writer.flush()
-
-                    '''Here the training and validation epoch have been run, now get the lowest validation loss model'''
-                    # Check if validation loss was better
-                    if best_validation_loss is None or average_validation_loss < best_validation_loss:
-                        print(f"&&& New best validation loss - before: {best_validation_loss};"
-                              f" after: {average_validation_loss} - saving model...")
-
-                        best_validation_loss = average_validation_loss
-
-                        # Save checkpoint
-                        saver = tf.compat.v1.train.Saver()
-                        saver.save(sess, ckpt_path + model_name + ".ckpt")
-
-                        epochs_no_gain = 0
-                    elif break_epochs_no_gain >= 1:  # Validation loss was worse. Check if break_epochs_no_gain is on
-                        epochs_no_gain += 1
-
-                        print(f"&&& No validation loss decrease for {epochs_no_gain} epochs,"
-                              f" breaking at {break_epochs_no_gain} epochs.")
-
-                        if epochs_no_gain == break_epochs_no_gain:
-                            print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
-                            break  # Probably return would do the same thing (for now)
-            # Training ends here
-            '''We used to save here - model saved after the last epoch'''
-            # Save checkpoint
-            # saver = tf.compat.v1.train.Saver()
-            # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model
-
-    def evaluate(self, data):
-        with tf.Session() as sess:
-            print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
-
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
-
-            # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
-            testing_writer = tf.summary.FileWriter(output_path + "/testing")
-            testing_writer.add_graph(sess.graph)
-
-            x_test, y_test, sequence_lengths = split_data_in_parts(data, window_size, window_size, vocabulary_size)
-
-            # Restore session
-            ckpt = tf.train.get_checkpoint_state(ckpt_path)
-            saver = tf.compat.v1.train.Saver()
-            # If there is a correct checkpoint at the path restore it
-            if ckpt and ckpt.model_checkpoint_path:
-                saver.restore(sess, ckpt.model_checkpoint_path)
-
-            num_batches = len(x_test) // batch_size
-
-            total_loss = 0
+            total_training_loss = 0
 
             start_time = time.time()
 
-            for i in range(num_batches):
-                x_batch = get_batch(x_test, i, batch_size, fixed_batch_size)
-                y_batch = get_batch(y_test, i, batch_size, fixed_batch_size)
-                sequence_length_batch = get_batch(sequence_lengths, i, batch_size, fixed_batch_size)
+            for i in range(num_training_batches):
+                x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
+                y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
+                sequence_length_batch = get_batch(sequence_lengths_train, i, batch_size, fixed_batch_size)
 
                 sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
                                                                        sequence_length_batch)
@@ -368,31 +229,170 @@ class MusicModel:
                 feed_dict = {
                     self.x: x_batch,
                     self.y: y_batch,
-                    self.training: False,
+                    self.training: True,
                     self.sequence_length_matrix: sequence_length_matrix
                 }
 
-                l = sess.run(self.loss, feed_dict=feed_dict)
+                if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
+                    s, _, l = sess.run([merged_summary, self.optimizer, self.loss], feed_dict=feed_dict)
 
-                total_loss += l
+                    training_writer.add_summary(s, i + epoch * num_training_batches)
+                else:
+                    _, l = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
+
+                total_training_loss += l
 
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                        or i == num_batches - 1:
-                    print(f"Step {i + 1} of {num_batches} | "
-                          f"Average loss: {total_loss / (i + 1)}, "
+                        or i == num_training_batches - 1:
+                    print(f"Step {i + 1} of {num_training_batches} | "
+                          f"Loss: {l}, "
                           f"Time from start: {time.time() - start_time}")
-            average_loss = total_loss / num_batches
-            print(f"Final testing stats | "
-                  f"Average loss: {average_loss}, "
+
+            average_training_loss = total_training_loss / num_training_batches
+            print(f"   Epoch {epoch + 1} | "
+                  f"Average loss: {average_training_loss}, "
                   f"Time spent: {time.time() - start_time}")
 
-            # We add this to TensorBoard so we don't have to dig in console logs and nohups
-            testing_loss_summary = tf.Summary()
-            testing_loss_summary.value.add(tag='testing_loss', simple_value=average_loss)
-            testing_writer.add_summary(testing_loss_summary, 1)
-            testing_writer.flush()
+            epoch_nll_summary = tf.Summary()
+            epoch_nll_summary.value.add(tag='epoch_nll', simple_value=average_training_loss)
+            training_writer.add_summary(epoch_nll_summary, epoch + 1)
+            training_writer.flush()
 
-            return average_loss
+            if valid_data is not None:
+                print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
+
+                x_valid, y_valid, sequence_lengths_valid = split_data_in_parts(valid_data, window_size, window_size, vocabulary_size)
+
+                num_validation_batches = len(x_valid) // batch_size
+
+                total_validation_loss = 0
+
+                start_time = time.time()
+
+                for i in range(num_validation_batches):
+                    x_batch = get_batch(x_valid, i, batch_size, fixed_batch_size)
+                    y_batch = get_batch(y_valid, i, batch_size, fixed_batch_size)
+                    sequence_length_batch = get_batch(sequence_lengths_valid, i, batch_size, fixed_batch_size)
+
+                    sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
+                                                                           sequence_length_batch)
+
+                    feed_dict = {
+                        self.x: x_batch,
+                        self.y: y_batch,
+                        self.training: False,
+                        self.sequence_length_matrix: sequence_length_matrix
+                    }
+
+                    l = sess.run(self.loss, feed_dict=feed_dict)
+
+                    total_validation_loss += l
+
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                            or i == num_validation_batches - 1:
+                        print(f"Step {i + 1} of {num_validation_batches} | "
+                              f"Average loss: {total_validation_loss / (i + 1)}, "
+                              f"Time from start: {time.time() - start_time}")
+
+                average_validation_loss = total_validation_loss / num_validation_batches
+                print(f"Final validation stats | "
+                      f"Average loss: {average_validation_loss}, "
+                      f"Time spent: {time.time() - start_time}")
+
+                epoch_nll_summary = tf.Summary()
+                epoch_nll_summary.value.add(tag='epoch_nll', simple_value=average_validation_loss)
+                validation_writer.add_summary(epoch_nll_summary, epoch + 1)
+                validation_writer.flush()
+
+                '''Here the training and validation epoch have been run, now get the lowest validation loss model'''
+                # Check if validation loss was better
+                if best_validation_loss is None or average_validation_loss < best_validation_loss:
+                    print(f"&&& New best validation loss - before: {best_validation_loss};"
+                          f" after: {average_validation_loss} - saving model...")
+
+                    best_validation_loss = average_validation_loss
+
+                    # Save checkpoint
+                    saver = tf.compat.v1.train.Saver()
+                    saver.save(sess, ckpt_path + model_name + ".ckpt")
+
+                    epochs_no_gain = 0
+                elif break_epochs_no_gain >= 1:  # Validation loss was worse. Check if break_epochs_no_gain is on
+                    epochs_no_gain += 1
+
+                    print(f"&&& No validation loss decrease for {epochs_no_gain} epochs,"
+                          f" breaking at {break_epochs_no_gain} epochs.")
+
+                    if epochs_no_gain == break_epochs_no_gain:
+                        print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
+                        break  # Probably return would do the same thing (for now)
+        # Training ends here
+        '''We used to save here - model saved after the last epoch'''
+        # Save checkpoint
+        # saver = tf.compat.v1.train.Saver()
+        # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model
+
+    def evaluate(self, data):
+        sess = tf.Session()
+        print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
+
+        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+
+        # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
+        testing_writer = tf.summary.FileWriter(output_path + "/testing")
+        testing_writer.add_graph(sess.graph)
+
+        x_test, y_test, sequence_lengths = split_data_in_parts(data, window_size, window_size, vocabulary_size)
+
+        # Restore session
+        ckpt = tf.train.get_checkpoint_state(ckpt_path)
+        saver = tf.compat.v1.train.Saver()
+        # If there is a correct checkpoint at the path restore it
+        if ckpt and ckpt.model_checkpoint_path:
+            saver.restore(sess, ckpt.model_checkpoint_path)
+
+        num_batches = len(x_test) // batch_size
+
+        total_loss = 0
+
+        start_time = time.time()
+
+        for i in range(num_batches):
+            x_batch = get_batch(x_test, i, batch_size, fixed_batch_size)
+            y_batch = get_batch(y_test, i, batch_size, fixed_batch_size)
+            sequence_length_batch = get_batch(sequence_lengths, i, batch_size, fixed_batch_size)
+
+            sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
+                                                                   sequence_length_batch)
+
+            feed_dict = {
+                self.x: x_batch,
+                self.y: y_batch,
+                self.training: False,
+                self.sequence_length_matrix: sequence_length_matrix
+            }
+
+            l = sess.run(self.loss, feed_dict=feed_dict)
+
+            total_loss += l
+
+            if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                    or i == num_batches - 1:
+                print(f"Step {i + 1} of {num_batches} | "
+                      f"Average loss: {total_loss / (i + 1)}, "
+                      f"Time from start: {time.time() - start_time}")
+        average_loss = total_loss / num_batches
+        print(f"Final testing stats | "
+              f"Average loss: {average_loss}, "
+              f"Time spent: {time.time() - start_time}")
+
+        # We add this to TensorBoard so we don't have to dig in console logs and nohups
+        testing_loss_summary = tf.Summary()
+        testing_loss_summary.value.add(tag='testing_loss', simple_value=average_loss)
+        testing_writer.add_summary(testing_loss_summary, 1)
+        testing_writer.flush()
+
+        return average_loss
 
 
 def create_sequence_length_matrix(batch_dimension, sequence_lengths):
