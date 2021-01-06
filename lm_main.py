@@ -385,122 +385,57 @@ class LMModel:
             training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
             training_writer.flush()
 
-            if validation_data is not None:
-                print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
+            average_validation_perplexity = self.evaluate(validation_data, "validation", sess, epoch + 1)
 
-                validation_indexes = get_window_indexes(len(validation_data), window_size, window_size // 2)
+            # Training and validation for epoch is done, check if validation perplexity was better this epoch
+            if best_validation_perplexity is None or average_validation_perplexity < best_validation_perplexity:
+                print(f"&&& New best validation perplexity - before: {best_validation_perplexity};"
+                      f" after: {average_validation_perplexity} - saving model...")
 
-                num_validation_batches = len(validation_indexes) // batch_size
+                best_validation_perplexity = average_validation_perplexity
 
-                total_validation_perplexity = 0
-                total_validation_accuracy = 0
+                # Save checkpoint
+                saver = tf.compat.v1.train.Saver()
+                saver.save(sess, ckpt_path + model_name + ".ckpt")
 
-                start_time = time.time()
+                epochs_no_gain = 0
+            elif break_epochs_no_gain >= 1:  # Validation perplexity was worse, check break_epochs_no_gain
+                epochs_no_gain += 1
 
-                for i in range(num_validation_batches):
-                    x_batch = get_batch(validation_indexes, i, batch_size, fixed_batch_size, continuous_batches)
+                print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs,"
+                      f" breaking at {break_epochs_no_gain} epochs.")
 
-                    if stateful:
-                        state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
-
-                    # Now we have batch of integers to look in text from
-                    x_batch, y_batch = get_input_data_from_indexes(validation_data, x_batch, window_size)
-
-                    if stateful:
-                        feed_dict = {
-                            self.x: x_batch,
-                            self.y: y_batch,
-                            self.training: False,
-                            self.outer_dropout_rate: 0.,
-                            self.initial_state: state
-                        }
-                    else:
-                        feed_dict = {
-                            self.x: x_batch,
-                            self.y: y_batch,
-                            self.training: False,
-                            self.outer_dropout_rate: 0.
-                        }
-
-                    if i == 0:  # To have 100% data covered we need to have full length values for first batch
-                        p, a = sess.run([self.perplexity, self.accuracy], feed_dict=feed_dict)
-                        # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
-                        p = 2 * p
-                        a = 2 * a
-                    else:
-                        p, a = sess.run([self.half_perplexity, self.half_accuracy], feed_dict=feed_dict)
-
-                    total_validation_perplexity += p
-                    total_validation_accuracy += a
-
-                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                            or i == num_validation_batches - 1:
-                        print(f"Step {i + 1} of {num_validation_batches} | "
-                              f"Average perplexity: {total_validation_perplexity / (i + 2)}, "
-                              f"Average accuracy: {total_validation_accuracy / (i + 2)}, "
-                              f"Time from start: {time.time() - start_time}")
-
-                # + 1 because we counted the 1st batch twice
-                average_validation_perplexity = total_validation_perplexity / (num_validation_batches + 1)
-                average_validation_accuracy = total_validation_accuracy / (num_validation_batches + 1)
-                print(f"Final validation stats | "
-                      f"Average perplexity: {average_validation_perplexity}, "
-                      f"Average accuracy: {average_validation_accuracy}, "
-                      f"Time spent: {time.time() - start_time}")
-
-                epoch_perplexity_summary = tf.Summary()
-                epoch_perplexity_summary.value.add(tag='epoch_perplexity', simple_value=average_validation_perplexity)
-                validation_writer.add_summary(epoch_perplexity_summary, epoch + 1)
-
-                epoch_accuracy_summary = tf.Summary()
-                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_validation_accuracy)
-                validation_writer.add_summary(epoch_accuracy_summary, epoch + 1)
-                validation_writer.flush()
-
-                # Training and validation for epoch is done, check if validation perplexity was better this epoch
-                if best_validation_perplexity is None or average_validation_perplexity < best_validation_perplexity:
-                    print(f"&&& New best validation perplexity - before: {best_validation_perplexity};"
-                          f" after: {average_validation_perplexity} - saving model...")
-
-                    best_validation_perplexity = average_validation_perplexity
-
-                    # Save checkpoint
-                    saver = tf.compat.v1.train.Saver()
-                    saver.save(sess, ckpt_path + model_name + ".ckpt")
-
-                    epochs_no_gain = 0
-                elif break_epochs_no_gain >= 1:  # Validation perplexity was worse, check break_epochs_no_gain
-                    epochs_no_gain += 1
-
-                    print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs,"
-                          f" breaking at {break_epochs_no_gain} epochs.")
-
-                    if epochs_no_gain == break_epochs_no_gain:
-                        print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
-                        break  # Probably return would do the same thing (for now)
+                if epochs_no_gain == break_epochs_no_gain:
+                    print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
+                    break  # Probably return would do the same thing (for now)
         # Training ends here
         '''We used to save here - model saved after the last epoch'''
         # Save checkpoint
         # saver = tf.compat.v1.train.Saver()
         # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model
 
-    def evaluate(self, data):
-        sess = tf.Session()
-        print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
+    def evaluate(self, data, mode="testing", session=None, iterator=1):
+        assert mode in ["validation", "testing"], "Mode must be \"validation\" or \"testing\""
+        if mode == "validation":
+            print(f"------ Starting validation for epoch {iterator}... ------")
+            sess = session
+        else:
+            sess = tf.Session()
+            print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
 
-        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+
+            # Restore session
+            ckpt = tf.train.get_checkpoint_state(ckpt_path)
+            saver = tf.compat.v1.train.Saver()
+            # If there is a correct checkpoint at the path restore it
+            if ckpt and ckpt.model_checkpoint_path:
+                saver.restore(sess, ckpt.model_checkpoint_path)
 
         # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
-        testing_writer = tf.summary.FileWriter(output_path + "/testing")
+        writer = tf.summary.FileWriter(output_path + f"/{mode}")
 
         indexes = get_window_indexes(len(data), window_size, window_size // 2)
-
-        # Restore session
-        ckpt = tf.train.get_checkpoint_state(ckpt_path)
-        saver = tf.compat.v1.train.Saver()
-        # If there is a correct checkpoint at the path restore it
-        if ckpt and ckpt.model_checkpoint_path:
-            saver.restore(sess, ckpt.model_checkpoint_path)
 
         num_batches = len(indexes) // batch_size
 
@@ -553,20 +488,20 @@ class LMModel:
                       f"Time from start: {time.time() - start_time}")
         average_perplexity = total_perplexity / (num_batches + 1)
         average_accuracy = total_accuracy / (num_batches + 1)
-        print(f"Final testing stats | "
+        print(f"Final {mode} stats | "
               f"Average perplexity: {average_perplexity}, "
               f"Average accuracy: {average_accuracy}, "
               f"Time spent: {time.time() - start_time}")
 
         # We add this to TensorBoard so we don't have to dig in console logs and nohups
-        testing_perplexity_summary = tf.Summary()
-        testing_perplexity_summary.value.add(tag='testing_perplexity', simple_value=average_perplexity)
-        testing_writer.add_summary(testing_perplexity_summary, 1)
+        perplexity_summary = tf.Summary()
+        perplexity_summary.value.add(tag=f'{mode}_perplexity', simple_value=average_perplexity)
+        writer.add_summary(perplexity_summary, 1)
 
-        testing_accuracy_summary = tf.Summary()
-        testing_accuracy_summary.value.add(tag='testing_accuracy', simple_value=average_accuracy)
-        testing_writer.add_summary(testing_accuracy_summary, 1)
-        testing_writer.flush()
+        accuracy_summary = tf.Summary()
+        accuracy_summary.value.add(tag=f'{mode}_accuracy', simple_value=average_accuracy)
+        writer.add_summary(accuracy_summary, 1)
+        writer.flush()
 
         return average_perplexity
 

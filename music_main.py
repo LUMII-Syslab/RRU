@@ -257,107 +257,68 @@ class MusicModel:
             training_writer.add_summary(epoch_nll_summary, epoch + 1)
             training_writer.flush()
 
-            if valid_data is not None:
-                print(f"------ Starting validation for epoch {epoch + 1} out of {num_epochs}... ------")
+            average_validation_loss = self.evaluate(valid_data, "validation", sess, epoch + 1)
 
-                x_valid, y_valid, sequence_lengths_valid = split_data_in_parts(valid_data, window_size, window_size, vocabulary_size)
+            '''Here the training and validation epoch have been run, now get the lowest validation loss model'''
+            # Check if validation loss was better
+            if best_validation_loss is None or average_validation_loss < best_validation_loss:
+                print(f"&&& New best validation loss - before: {best_validation_loss};"
+                      f" after: {average_validation_loss} - saving model...")
 
-                num_validation_batches = len(x_valid) // batch_size
+                best_validation_loss = average_validation_loss
 
-                total_validation_loss = 0
+                # Save checkpoint
+                saver = tf.compat.v1.train.Saver()
+                saver.save(sess, ckpt_path + model_name + ".ckpt")
 
-                start_time = time.time()
+                epochs_no_gain = 0
+            elif break_epochs_no_gain >= 1:  # Validation loss was worse. Check if break_epochs_no_gain is on
+                epochs_no_gain += 1
 
-                for i in range(num_validation_batches):
-                    x_batch = get_batch(x_valid, i, batch_size, fixed_batch_size)
-                    y_batch = get_batch(y_valid, i, batch_size, fixed_batch_size)
-                    sequence_length_batch = get_batch(sequence_lengths_valid, i, batch_size, fixed_batch_size)
+                print(f"&&& No validation loss decrease for {epochs_no_gain} epochs,"
+                      f" breaking at {break_epochs_no_gain} epochs.")
 
-                    sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
-                                                                           sequence_length_batch)
-
-                    feed_dict = {
-                        self.x: x_batch,
-                        self.y: y_batch,
-                        self.training: False,
-                        self.sequence_length_matrix: sequence_length_matrix
-                    }
-
-                    l = sess.run(self.loss, feed_dict=feed_dict)
-
-                    total_validation_loss += l
-
-                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                            or i == num_validation_batches - 1:
-                        print(f"Step {i + 1} of {num_validation_batches} | "
-                              f"Average loss: {total_validation_loss / (i + 1)}, "
-                              f"Time from start: {time.time() - start_time}")
-
-                average_validation_loss = total_validation_loss / num_validation_batches
-                print(f"Final validation stats | "
-                      f"Average loss: {average_validation_loss}, "
-                      f"Time spent: {time.time() - start_time}")
-
-                epoch_nll_summary = tf.Summary()
-                epoch_nll_summary.value.add(tag='epoch_nll', simple_value=average_validation_loss)
-                validation_writer.add_summary(epoch_nll_summary, epoch + 1)
-                validation_writer.flush()
-
-                '''Here the training and validation epoch have been run, now get the lowest validation loss model'''
-                # Check if validation loss was better
-                if best_validation_loss is None or average_validation_loss < best_validation_loss:
-                    print(f"&&& New best validation loss - before: {best_validation_loss};"
-                          f" after: {average_validation_loss} - saving model...")
-
-                    best_validation_loss = average_validation_loss
-
-                    # Save checkpoint
-                    saver = tf.compat.v1.train.Saver()
-                    saver.save(sess, ckpt_path + model_name + ".ckpt")
-
-                    epochs_no_gain = 0
-                elif break_epochs_no_gain >= 1:  # Validation loss was worse. Check if break_epochs_no_gain is on
-                    epochs_no_gain += 1
-
-                    print(f"&&& No validation loss decrease for {epochs_no_gain} epochs,"
-                          f" breaking at {break_epochs_no_gain} epochs.")
-
-                    if epochs_no_gain == break_epochs_no_gain:
-                        print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
-                        break  # Probably return would do the same thing (for now)
+                if epochs_no_gain == break_epochs_no_gain:
+                    print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
+                    break  # Probably return would do the same thing (for now)
         # Training ends here
         '''We used to save here - model saved after the last epoch'''
         # Save checkpoint
         # saver = tf.compat.v1.train.Saver()
         # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model
 
-    def evaluate(self, data):
-        sess = tf.Session()
-        print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
+    def evaluate(self, data, mode="testing", session=None, iterator=1):
+        assert mode in ["validation", "testing"], "Mode must be \"validation\" or \"testing\""
+        if mode == "validation":
+            print(f"------ Starting validation for epoch {iterator}... ------")
+            sess = session
+        else:
+            sess = tf.Session()
+            print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
 
-        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+
+            # Restore session
+            ckpt = tf.train.get_checkpoint_state(ckpt_path)
+            saver = tf.compat.v1.train.Saver()
+            # If there is a correct checkpoint at the path restore it
+            if ckpt and ckpt.model_checkpoint_path:
+                saver.restore(sess, ckpt.model_checkpoint_path)
 
         # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
-        testing_writer = tf.summary.FileWriter(output_path + "/testing")
+        writer = tf.summary.FileWriter(output_path + f"/{mode}")
 
-        x_test, y_test, sequence_lengths = split_data_in_parts(data, window_size, window_size, vocabulary_size)
+        x, y, sequence_lengths = split_data_in_parts(data, window_size, window_size, vocabulary_size)
 
-        # Restore session
-        ckpt = tf.train.get_checkpoint_state(ckpt_path)
-        saver = tf.compat.v1.train.Saver()
-        # If there is a correct checkpoint at the path restore it
-        if ckpt and ckpt.model_checkpoint_path:
-            saver.restore(sess, ckpt.model_checkpoint_path)
-
-        num_batches = len(x_test) // batch_size
+        num_batches = len(x) // batch_size
 
         total_loss = 0
 
         start_time = time.time()
 
         for i in range(num_batches):
-            x_batch = get_batch(x_test, i, batch_size, fixed_batch_size)
-            y_batch = get_batch(y_test, i, batch_size, fixed_batch_size)
+            x_batch = get_batch(x, i, batch_size, fixed_batch_size)
+            y_batch = get_batch(y, i, batch_size, fixed_batch_size)
             sequence_length_batch = get_batch(sequence_lengths, i, batch_size, fixed_batch_size)
 
             sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
@@ -380,15 +341,15 @@ class MusicModel:
                       f"Average loss: {total_loss / (i + 1)}, "
                       f"Time from start: {time.time() - start_time}")
         average_loss = total_loss / num_batches
-        print(f"Final testing stats | "
+        print(f"Final {mode} stats | "
               f"Average loss: {average_loss}, "
               f"Time spent: {time.time() - start_time}")
 
         # We add this to TensorBoard so we don't have to dig in console logs and nohups
-        testing_loss_summary = tf.Summary()
-        testing_loss_summary.value.add(tag='testing_loss', simple_value=average_loss)
-        testing_writer.add_summary(testing_loss_summary, 1)
-        testing_writer.flush()
+        loss_summary = tf.Summary()
+        loss_summary.value.add(tag=f'{mode}_nll', simple_value=average_loss)
+        writer.add_summary(loss_summary, iterator)
+        writer.flush()
 
         return average_loss
 
