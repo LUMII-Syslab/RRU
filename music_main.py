@@ -6,15 +6,11 @@ from datetime import datetime  # We'll use this to dynamically generate training
 from sklearn.utils import shuffle  # We'll use this to shuffle training data
 
 # Importing some functions that will help us deal with the input data
-from music_utils import load_data
-from music_utils import split_data_in_parts
+from music_utils import load_data, split_data_in_parts
 
 # Importing some utility functions that will help us with certain tasks
-from utils import find_optimal_hidden_units
-from utils import print_trainable_variables
-from utils import get_batch
-from utils import save_model
-from utils import restore_model
+from utils import find_optimal_hidden_units, print_trainable_variables, get_batch, save_model, restore_model
+from utils import print_trials_information, NetworkPrint
 
 from cell_registry import get_cell_information
 
@@ -47,7 +43,7 @@ batch_size = 16  # Max batch_sizes: JSB Chorales 76; MuseData 124; Nottingham 17
 fixed_batch_size = False  # With this False it may run some batches on size [batch_size, 2 * batch_size)
 shuffle_data = True  # Should we shuffle the samples?
 # Training
-num_epochs = 3  # 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
+num_epochs = 1000000  # We can code this to go infinity, but I see no point, we won't wait 1 million epochs anyway
 break_epochs_no_gain = 7  # If validation BPC doesn't get lower, after how many epochs we should break (-1 -> disabled)
 HIDDEN_UNITS = 128 * 3  # This will only be used if the number_of_parameters is None or < 1
 number_of_parameters = 5000000  # 1 million learnable parameters
@@ -193,7 +189,7 @@ class MusicModel:
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
         sess = tf.Session(config=tf_config)
-        print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
+        NetworkPrint.training_start()
         sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
         # Adding a writer so we can visualize accuracy and loss on TensorBoard
@@ -211,10 +207,10 @@ class MusicModel:
         best_validation_loss = None
 
         for epoch in range(num_epochs):
-            print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
+            NetworkPrint.epoch_start(epoch + 1, num_epochs)
 
             if shuffle_data:
-                x_train, y_train, sequence_lengths_train = shuffle(x_train, y_train, sequence_lengths_train)  # Check if it this shuffles correctly maybe
+                x_train, y_train, sequence_lengths_train = shuffle(x_train, y_train, sequence_lengths_train)
 
             total_training_loss = 0
 
@@ -236,24 +232,20 @@ class MusicModel:
                 }
 
                 if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                    s, _, l = sess.run([merged_summary, self.optimizer, self.loss], feed_dict=feed_dict)
+                    s, _, loss = sess.run([merged_summary, self.optimizer, self.loss], feed_dict=feed_dict)
 
                     training_writer.add_summary(s, i + epoch * num_training_batches)
                 else:
-                    _, l = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
+                    _, loss = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
 
-                total_training_loss += l
+                total_training_loss += loss
 
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                         or i == num_training_batches - 1:
-                    print(f"Step {i + 1} of {num_training_batches} | "
-                          f"Loss: {l}, "
-                          f"Time from start: {time.time() - start_time}")
+                    NetworkPrint.step_results(i + 1, num_training_batches, [["Loss", loss]], time.time() - start_time)
 
             average_training_loss = total_training_loss / num_training_batches
-            print(f"   Epoch {epoch + 1} | "
-                  f"Average loss: {average_training_loss}, "
-                  f"Time spent: {time.time() - start_time}")
+            NetworkPrint.epoch_end(epoch + 1, [["Average loss", average_training_loss]], time.time() - start_time)
 
             epoch_nll_summary = tf.Summary()
             epoch_nll_summary.value.add(tag='epoch_nll', simple_value=average_training_loss)
@@ -282,21 +274,16 @@ class MusicModel:
 
                 if epochs_no_gain == break_epochs_no_gain:
                     print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
-                    break  # Probably return would do the same thing (for now)
-        # Training ends here
-        '''We used to save here - model saved after the last epoch'''
-        # Save checkpoint
-        # saver = tf.compat.v1.train.Saver()
-        # saver.save(sess, ckpt_path + model_name + ".ckpt")  # global_step=1 and etc., can index the saved model
+                    return
 
     def evaluate(self, data, mode="testing", session=None, iterator=1):
         assert mode in ["validation", "testing"], "Mode must be \"validation\" or \"testing\""
         if mode == "validation":
-            print(f"------ Starting validation for epoch {iterator}... ------")
+            NetworkPrint.validation_start(iterator)
             sess = session
         else:
             sess = tf.Session()
-            print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
+            NetworkPrint.testing_start()
 
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
@@ -329,19 +316,16 @@ class MusicModel:
                 self.sequence_length_matrix: sequence_length_matrix
             }
 
-            l = sess.run(self.loss, feed_dict=feed_dict)
+            loss = sess.run(self.loss, feed_dict=feed_dict)
 
-            total_loss += l
+            total_loss += loss
 
             if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                     or i == num_batches - 1:
-                print(f"Step {i + 1} of {num_batches} | "
-                      f"Average loss: {total_loss / (i + 1)}, "
-                      f"Time from start: {time.time() - start_time}")
+                NetworkPrint.step_results(i + 1, num_batches, [["Average loss", total_loss / (i + 1)]],
+                                          time.time() - start_time)
         average_loss = total_loss / num_batches
-        print(f"Final {mode} stats | "
-              f"Average loss: {average_loss}, "
-              f"Time spent: {time.time() - start_time}")
+        NetworkPrint.evaluation_end(mode, [["Average loss", average_loss]], time.time() - start_time)
 
         # We add this to TensorBoard so we don't have to dig in console logs and nohups
         loss_summary = tf.Summary()
@@ -402,7 +386,7 @@ if __name__ == '__main__':  # Main function
             hp.loguniform('lr', np.log(0.0004), np.log(0.004))
         ]
 
-        def objective(num_params, out_size, middle_multiplier, drop_rate, gate_bias_value, lr):
+        def objective(num_params, out_size, middle_multiplier, drop_rate, lr):
             # For some values we need extra stuff
             num_params = round(num_params)
             out_size = round(out_size)
@@ -419,7 +403,9 @@ if __name__ == '__main__':  # Main function
 
             # This might give some clues
             global output_path
-            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}/num_params{num_params}out_size{out_size}middle_multiplier{middle_multiplier}lr{lr}dropout{drop_rate}"  # gate_bias{gate_bias}
+            output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
+                          f"/num_params{num_params}out_size{out_size}middle_multiplier{middle_multiplier}" \
+                          f"lr{lr}dropout{drop_rate}"  # gate_bias{gate_bias}
 
             global HIDDEN_UNITS
             global model_function
@@ -445,8 +431,6 @@ if __name__ == '__main__':  # Main function
 
         # Run 2000 evals with the tpe algorithm
         tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
-
-        from utils import print_trials_information
 
         print_trials_information(hyperopt_trials=tpe_trials,
                                  round_uniform=round_uniform,

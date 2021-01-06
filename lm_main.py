@@ -9,10 +9,8 @@ from sklearn.utils import shuffle  # We'll use this to shuffle training data
 from lm_utils import load_data, get_window_indexes, get_input_data_from_indexes, get_zeros_state
 
 # Importing some utility functions that will help us with certain tasks
-from utils import find_optimal_hidden_units
-from utils import print_trainable_variables
-from utils import get_batch
-from utils import save_model, restore_model
+from utils import find_optimal_hidden_units, print_trainable_variables, get_batch, save_model, restore_model
+from utils import print_trials_information, NetworkPrint
 
 from cell_registry import get_cell_information
 
@@ -262,7 +260,7 @@ class LMModel:
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
         sess = tf.Session(config=tf_config)
-        print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
+        NetworkPrint.training_start()
 
         sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
@@ -287,7 +285,7 @@ class LMModel:
         best_validation_perplexity = None
 
         for epoch in range(num_epochs):
-            print(f"------ Epoch {epoch + 1} out of {num_epochs} ------")
+            NetworkPrint.epoch_start(epoch + 1, num_epochs)
 
             if shuffle_data:
                 training_indexes = shuffle(training_indexes)
@@ -360,18 +358,14 @@ class LMModel:
 
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                         or i == num_training_batches - 1:
-                    print(f"Step {i + 1} of {num_training_batches} | "
-                          f"Perplexity: {p}, "
-                          f"Accuracy: {a}, "
-                          f"Time from start: {time.time() - start_time}")
+                    NetworkPrint.step_results(i + 1, num_training_batches, [["Perplexity", p], ["Accuracy", a]], time.time() - start_time)
 
             statistics_count = (num_training_batches + 1) if extra_tasks_for_perfection else num_training_batches
             average_training_perplexity = total_training_perplexity / statistics_count
             average_training_accuracy = total_training_accuracy / statistics_count
-            print(f"   Epoch {epoch + 1} | "
-                  f"Average perplexity: {average_training_perplexity}, "
-                  f"Average accuracy: {average_training_accuracy}, "
-                  f"Time spent: {time.time() - start_time}")
+            NetworkPrint.epoch_end(epoch + 1,
+                                   [["Average perplexity", average_training_perplexity],
+                                    ["Average accuracy", average_training_accuracy]], time.time() - start_time)
 
             epoch_perplexity_summary = tf.Summary()
             epoch_perplexity_summary.value.add(tag='epoch_perplexity', simple_value=average_training_perplexity)
@@ -413,11 +407,11 @@ class LMModel:
     def evaluate(self, data, mode="testing", session=None, iterator=1):
         assert mode in ["validation", "testing"], "Mode must be \"validation\" or \"testing\""
         if mode == "validation":
-            print(f"------ Starting validation for epoch {iterator}... ------")
+            NetworkPrint.validation_start(iterator)
             sess = session
         else:
             sess = tf.Session()
-            print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
+            NetworkPrint.testing_start()
 
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
@@ -474,16 +468,14 @@ class LMModel:
 
             if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                     or i == num_batches - 1:
-                print(f"Step {i + 1} of {num_batches} | "
-                      f"Average perplexity: {total_perplexity / (i + 2)}, "
-                      f"Average accuracy: {total_accuracy / (i + 2)}, "
-                      f"Time from start: {time.time() - start_time}")
+                NetworkPrint.step_results(i + 1, num_batches, [["Average perplexity", total_perplexity / (i + 2)],
+                                                               ["Average accuracy", total_accuracy / (i + 2)]],
+                                          time.time() - start_time)
         average_perplexity = total_perplexity / (num_batches + 1)
         average_accuracy = total_accuracy / (num_batches + 1)
-        print(f"Final {mode} stats | "
-              f"Average perplexity: {average_perplexity}, "
-              f"Average accuracy: {average_accuracy}, "
-              f"Time spent: {time.time() - start_time}")
+        NetworkPrint.evaluation_end(mode, [["Average perplexity", average_perplexity],
+                                           ["Average accuracy", average_accuracy]],
+                                    time.time() - start_time)
 
         # We add this to TensorBoard so we don't have to dig in console logs and nohups
         perplexity_summary = tf.Summary()
@@ -504,11 +496,11 @@ if __name__ == '__main__':  # Main function
     TRAINING_DATA, VALIDATION_DATA, TESTING_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
 
     # To see how it trains in small amounts (If it's usually in a 90%/5%/5% split, now it's in a 1%/1%/1% split)
-    '''
+    # '''
     TRAINING_DATA = TRAINING_DATA[:len(TRAINING_DATA) // 90]
     VALIDATION_DATA = VALIDATION_DATA[:len(VALIDATION_DATA) // 5]
     TESTING_DATA = TESTING_DATA[:len(TESTING_DATA) // 5]
-    '''
+    # '''
 
     # From which function/class we can get the model
     model_function = LMModel
@@ -600,8 +592,6 @@ if __name__ == '__main__':  # Main function
         tpe_trials = Trials()
 
         tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=times_to_evaluate)
-
-        from utils import print_trials_information
 
         print_trials_information(tpe_trials,
                                  hyperopt_choices=choices,

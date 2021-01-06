@@ -177,3 +177,43 @@ def restore_model(sess, ckpt_path):
     # If there is a correct checkpoint at the path restore it
     if ckpt and ckpt.model_checkpoint_path:
         saver.restore(sess, ckpt.model_checkpoint_path)
+
+
+class NetworkPrint:
+
+    @staticmethod
+    def training_start():
+        print("|*|*|*|*|*| Starting training... |*|*|*|*|*|")
+
+    @staticmethod
+    def validation_start(epoch):
+        print(f"------ Starting validation for epoch {epoch}... ------")
+
+    @staticmethod
+    def testing_start():
+        print("|*|*|*|*|*| Starting testing... |*|*|*|*|*|")
+
+    @staticmethod
+    def evaluation_end(mode, metrics, time):
+        print(f"Final {mode} stats | ", end='')
+        for metric in metrics:
+            print(f"{metric[0]}: {metric[1]}, ", end='')
+        print(f"Time spent: {time}")
+
+    @staticmethod
+    def epoch_start(from_epoch, to_epoch):
+        print(f"------ Epoch {from_epoch} out of {to_epoch} ------")
+
+    @staticmethod
+    def epoch_end(epoch, metrics, time):
+        print(f"   Epoch {epoch} | ", end='')
+        for metric in metrics:
+            print(f"{metric[0]}: {metric[1]}, ", end='')
+        print(f"Time spent: {time}")
+
+    @staticmethod
+    def step_results(from_step, to_step, metrics, time):
+        print(f"Step {from_step} of {to_step} | ", end='')
+        for metric in metrics:
+            print(f"{metric[0]}: {metric[1]}, ", end='')
+        print(f"Time from start: {time}")
