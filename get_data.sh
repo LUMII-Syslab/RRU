@@ -1,21 +1,27 @@
+# This file downloads all the data sets necessary for language and music modeling tasks and puts them in a convenient
+# folder arrangement
+
 echo "Downloading data sets!"
-# Create the directory which will hold the data sets
+# Create a directory, which will hold the data sets
 # -p, --parents -> No error if the folder(s) exist, make parent directories as needed
 mkdir -p data
 cd data
 
 echo "  Downloading language modeling data sets!"
+# Create a directory, which will hold the data sets for the language modeling task
 mkdir -p lm
 cd lm
 
+# Create a directory which will hold the downloaded data
 mkdir -p unchanged
+# Create a directory which will hold the prepared data (which will be done in a separate file)
 mkdir -p ready
 cd unchanged
 
 echo "    Downloading enwik8 data set!"
-# --continue -> Continue getting a partially downloaded file (if there already is a file named like that in the current directory
-# , wget will assume that it is the first portion of the remote file, and will ask the server to continue the retrieval from an offset
-# equal to the length of the local file)
+# --continue -> Continue getting a partially downloaded file (if there already is a file named like that in the current
+# directory, wget will assume that it is the first portion of the remote file, and will ask the server to continue the
+# retrieval from an offset equal to the length of the local file)
 wget --continue http://mattmahoney.net/dc/enwik8.zip
 
 echo "    Downloading text8 data set!"
@@ -24,11 +30,14 @@ wget --continue http://mattmahoney.net/dc/text8.zip
 echo "    Downloading Penn Treebank (PTB) data set!"
 # -q, --quiet -> Turn off wget's output
 wget --quiet --continue http://www.fit.vutbr.cz/~imikolov/rnnlm/simple-examples.tgz
-# -x -> Extract files from an archive; -z -> Filter the archive through gzip(1); -f -> the next argument is the file name of the archive
-# In a few words, it extracts it to a folder
+# -x -> Extract files from an archive; -z -> Filter the archive through gzip(1); -f -> the next argument is the file
+# name of the archive. In a few words, it extracts the data to a folder
 tar -xzf simple-examples.tgz
 
 echo "      Organizing Penn Treebank data set files!"
+
+# Takes the necessary data from the archive and moves it to a more convenient location, then deletes the information,
+# that we won't be using
 
 mkdir -p penn
 cd penn
@@ -52,6 +61,7 @@ cd ..
 cd ..
 
 echo "  Downloading music modeling data sets!"
+# Create a directory, which will hold the data sets for the music modeling task
 mkdir -p mm
 cd mm
 
@@ -72,4 +82,3 @@ echo "    Downloading JSB Chorales data set!"
 wget --continue "http://www-etud.iro.umontreal.ca/~boulanni/JSB Chorales.pickle"
 
 echo "Downloading finished!"
-

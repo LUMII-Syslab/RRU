@@ -1,3 +1,7 @@
+# This file implements the main functions for running the sentiment analysis task, this includes: model creation; model
+# training, model testing and the main function that controls all the flow
+
+# Importing the machine learning framework
 import tensorflow as tf
 
 # We'll use this to measure time spent in training and testing
@@ -79,7 +83,7 @@ log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
 print_after_this_many_steps = 1  # integer, >= 0
 
-# There are 2 classes for sentiment guessing for IMDB data set
+# There are 2 classes for sentiment analysis for the "IMDB" data set
 num_classes = 2
 
 # Get information about the picked cell
@@ -97,10 +101,16 @@ output_path = log_path + model_name + '/IMDB/' + current_time  # IMDB while ther
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
-# Class for solving sentiment analysis tasks, you can create a model, train it and test it
+# Class for solving sentiment analysis modeling tasks. You can create a model, train it and test it
 class SentimentAnalysisModel:
 
     def __init__(self, hidden_units):
+        """
+            This function (also a constructor) creates a machine learning model for solving the sentiment analysis task.
+
+            Input:
+                hidden_units: int, the amount of hidden units to use for the RNN cell(s).
+        """
 
         print("\nBuilding Graph...\n")
 
@@ -119,7 +129,7 @@ class SentimentAnalysisModel:
         # Batch size list of sequence lengths, so we can get variable length sequence RNN
         sequence_length = tf.placeholder(tf.int32, [None], name="sequence_length")
 
-        # Cast our label to float32. Later it will be better when it does some math (?)
+        # Cast our label to float32, it's more effective when doing some "math"
         y = tf.cast(y, tf.float32)
 
         # Instantiate our embedding matrix
@@ -144,6 +154,8 @@ class SentimentAnalysisModel:
         # Create the initial state of zeros
         initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
 
+        # Value will have all the outputs.
+        # State will contain the hidden states between the time steps.
         value, state = tf.nn.dynamic_rnn(cell,
                                          embed_lookup,
                                          initial_state=initial_state,
@@ -177,7 +189,6 @@ class SentimentAnalysisModel:
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
         # Calculate the loss given prediction and labels
-        # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=prediction, labels=y))
         loss = tf.losses.softmax_cross_entropy(onehot_labels=y, logits=prediction, label_smoothing=0.1)
 
         # Printing trainable variables which have "kernel" in their name
@@ -203,30 +214,47 @@ class SentimentAnalysisModel:
         self.sequence_length = sequence_length
         # Information you can get from this graph
         self.loss = loss
-        self.optimizer = optimizer
         self.accuracy = accuracy
+        # To call the optimization step (gradient descent)
+        self.optimizer = optimizer
 
         print_trainable_variables()
 
         print("\nGraph Built...\n")
 
-    def fit(self, x_train, y_train):  # Trains the model
+    def fit(self, x_train, y_train):
+        """
+            This function trains the model using the training data passed.
+
+            Input:
+                x_train: list, a list of input sequences to be fed in the model;
+                y_train: list, a list of input sequences to be fed in the model.
+        """
+
         sess = tf.Session()
+
+        # We print that the training has started
         NetworkPrint.training_start()
 
+        # We initialize the variables
         sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
         # Adding a writer so we can visualize accuracy and loss on TensorBoard
         merged_summary = tf.summary.merge_all()
         training_writer = tf.summary.FileWriter(output_path + "/training")
+        # Adding session graph to the writer, so we can look at it, if we want, in TensorBoard
         training_writer.add_graph(sess.graph)
 
+        # We calculate the number of batches
+        num_batches = len(x_train) // batch_size
+
         for epoch in range(num_epochs):
+            # Print that the epoch has started
             NetworkPrint.epoch_start(epoch + 1, num_epochs)
+
+            # If necessary, shuffle data
             if shuffle_data:
                 x_train, y_train = shuffle(x_train, y_train)
-
-            num_batches = len(x_train) // batch_size
 
             total_loss = 0
             total_accuracy = 0
@@ -234,9 +262,11 @@ class SentimentAnalysisModel:
             start_time = time.time()
 
             for i in range(num_batches):
+                # Get a batches of data
                 x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
                 y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
 
+                # Get the sequence lengths of the input sequences
                 sequence_lengths = get_sequence_lengths(x_batch)
 
                 feed_dict = {
@@ -246,10 +276,12 @@ class SentimentAnalysisModel:
                     self.sequence_length: sequence_lengths
                 }
 
+                # If we need to log this batch, we also add summary to the sess.run
                 if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
                     s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
                                           feed_dict=feed_dict)
 
+                    # Adding the summary to TensorBoard
                     training_writer.add_summary(s, i + epoch * num_batches)
                 else:
                     _, l, a = sess.run([self.optimizer, self.loss, self.accuracy],
@@ -258,13 +290,21 @@ class SentimentAnalysisModel:
                 total_loss += l
                 total_accuracy += a
 
+                # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
+                # to print in
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                         or i == num_batches - 1:
-                    NetworkPrint.step_results(i + 1, num_batches, [["Loss", l], ["Accuracy", a]], time.time() - start_time)
+                    NetworkPrint.step_results(i + 1, num_batches, [["Loss", l], ["Accuracy", a]],
+                                              time.time() - start_time)
 
             average_loss = total_loss / num_batches
             average_accuracy = total_accuracy / num_batches
-            NetworkPrint.epoch_end(epoch + 1, [["Average loss", average_loss], ["Average accuracy", average_accuracy]], time.time() - start_time)
+
+            # Print the stats gained in the epoch
+            NetworkPrint.epoch_end(epoch + 1, [["Average loss", average_loss], ["Average accuracy", average_accuracy]],
+                                   time.time() - start_time)
+
+            # Add loss and accuracy to TensorBoard
 
             epoch_loss_summary = tf.Summary()
             epoch_loss_summary.value.add(tag='epoch_loss', simple_value=average_loss)
@@ -275,21 +315,36 @@ class SentimentAnalysisModel:
             training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
             training_writer.flush()
         # Training ends here
-        # Save checkpoint
+        # Save the model
         save_model(sess, ckpt_path, model_name)
 
-    def evaluate(self, x_test, y_test):  # Tests the model
+    def evaluate(self, x_test, y_test):
+        """
+            This function tests the model with the passed data.
+
+            Input:
+                x_test: list, a list of input sequences to be fed in the model;
+                y_test: list, a list of one-hot encoded output sequences to be fed in the model.
+
+            Output:
+                average_loss: float, the average loss (NLL) gained after evaluating that passed data.
+        """
+
         sess = tf.Session()
+
+        # We print that the testing has started
         NetworkPrint.testing_start()
 
+        # We initialize the variables
         sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
         # Adding a writer so we can visualize accuracy and loss on TensorBoard
         testing_writer = tf.summary.FileWriter(output_path + "/testing")
 
-        # Restore session
+        # Restore the session
         restore_model(sess, ckpt_path)
 
+        # We calculate the number of batches
         num_batches = len(x_test) // batch_size
 
         total_loss = 0
@@ -298,9 +353,11 @@ class SentimentAnalysisModel:
         start_time = time.time()
 
         for i in range(num_batches):
+            # Get a batches of data
             x_batch = get_batch(x_test, i, batch_size, fixed_batch_size)
             y_batch = get_batch(y_test, i, batch_size, fixed_batch_size)
 
+            # Get the sequence lengths of the input sequences
             sequence_lengths = get_sequence_lengths(x_batch)
 
             l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch,
@@ -311,6 +368,8 @@ class SentimentAnalysisModel:
             total_loss += l
             total_accuracy += a
 
+            # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
+            # to print in
             if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                     or i == num_batches - 1:
                 NetworkPrint.step_results(i + 1, num_batches, [["Average loss", total_loss / (i + 1)],
@@ -319,10 +378,13 @@ class SentimentAnalysisModel:
 
         average_loss = total_loss / num_batches
         average_accuracy = total_accuracy / num_batches
+
+        # Print the stats gained in the evaluation phase
         NetworkPrint.evaluation_end("testing", [["Average loss", average_loss], ["Average accuracy", average_accuracy]],
                                     time.time() - start_time)
 
-        # We add this to TensorBoard so we don't have to dig in console logs and nohups
+        # We add the final loss and accuracy to TensorBoard so we don't have to dig into the console logs and nohup
+        # files
         testing_loss_summary = tf.Summary()
         testing_loss_summary.value.add(tag='testing_loss', simple_value=average_loss)
         testing_writer.add_summary(testing_loss_summary, 1)
@@ -332,29 +394,35 @@ class SentimentAnalysisModel:
         testing_writer.add_summary(testing_accuracy_summary, 1)
         testing_writer.flush()
 
+        # We return the average accuracy (accuracy being the main metric for the sentiment analysis data sets)
         return average_accuracy
 
 
 if __name__ == '__main__':  # Main function
-
     # Load the IMDB data set
     X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, max_sequence_length = load_data(vocabulary_size, max_sequence_length)
 
     # From which function/class we can get the model
     model_function = SentimentAnalysisModel
 
-    if not do_hyperparameter_optimization:
+    if not do_hyperparameter_optimization:  # If hyperparameter optimization is off
+        # Find the optimal hidden units to use without surpassing the number of parameters
         HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
                                                  number_of_parameters=number_of_parameters,
                                                  model_function=model_function)
 
-        MODEL = model_function(HIDDEN_UNITS)  # Create the model
+        # Create the model with the optimal hidden units
+        MODEL = model_function(HIDDEN_UNITS)
 
+        # Train the model
         MODEL.fit(X_TRAIN, Y_TRAIN)
 
+        # Test the last saved model
         MODEL.evaluate(X_TEST, Y_TEST)
-    else:
-        # This needs better hyperparameter config (didn't update it yet, because didn't run it yet)
+    else:  # If hyperparameter optimization is on
+        # This probably needs better hyperparameter config (didn't update it yet, because didn't run it yet)
+
+        # What we need to do with "hp.choice" variables
         lr_choice = [0.1, 0.05, 0.01, 0.005, 0.001]
         num_layers_choice = [1, 2, 3]
         batch_choice = [1, 2, 4, 8, 16, 32, 64]
@@ -365,6 +433,7 @@ if __name__ == '__main__':  # Main function
             'batch': batch_choice
         }
 
+        # Define the space that will be passed into the hyperopt optimizing functions
         space = [
             hp.choice('lr', lr_choice),
             hp.choice('num_layers', num_layers_choice),
@@ -372,37 +441,46 @@ if __name__ == '__main__':  # Main function
         ]
 
         def objective(lr, num_layers, batch):
-            # The parameters to be optimized
+            # The function inputs must be in the same order as they are specified in the space variable
+            # This function does the same steps as the above code (when hyperparameter optimization is off), but it has
+            # to set the passed variables (some of them need some additional actions) and return the metric that has to
+            # be minimized while doing the hyperparameter optimization
+
+            # We'll optimize these parameters (we need to set them globally, because we use global variables in some of
+            # the model functions, so the code is clearer and it doesn't need too many variables in each function)
             global learning_rate, number_of_layers, batch_size
             learning_rate = lr
             number_of_layers = num_layers
             batch_size = batch
 
-            # This might give some clues
+            # We set an output path that includes the configuration, so we can later see the values in TensorBoard
             global output_path
             output_path = f"{log_path}{model_name}/{current_time}/lr{lr}layers{num_layers}batch{batch}"
 
             global HIDDEN_UNITS, model_function
-
+            # Find the optimal hidden units to use without surpassing the number of parameters
             HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
                                                      number_of_parameters=number_of_parameters,
                                                      model_function=model_function)
 
-            model = model_function(HIDDEN_UNITS)  # Create the model
+            # Create the model with the optimal hidden units
+            model = model_function(HIDDEN_UNITS)
 
-            model.fit(X_TRAIN, Y_TRAIN)  # Train the model (validating after each epoch)
+            # Train the model
+            model.fit(X_TRAIN, Y_TRAIN)
 
             # Test the last saved model (it returns testing accuracy, and hyperopt needs something to minimize, so we
-            # pass negative accuracy)
+            # pass the negative accuracy)
             return - model.evaluate(X_TEST, Y_TEST)
 
+        # To optimize multiple hyperparameters, we need to create this function that uses *args
         # https://github.com/hyperopt/hyperopt/issues/129
         def objective2(args):
             return objective(*args)
 
-        # Create the algorithm
+        # Create the algorithm we are going to use for hyperparameter optimization
         tpe_algo = tpe.suggest
-        # Create trials object
+        # Create a Trials object, so we can later print out configuration in each trial
         tpe_trials = Trials()
 
         # Run specified evaluations with the tpe algorithm

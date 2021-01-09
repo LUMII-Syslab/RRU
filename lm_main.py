@@ -1,4 +1,10 @@
+# This file implements the main functions for running the language modeling task, this includes: model creation; model
+# training, model testing and the main function (that controls all the flow)
+
+# Importing the machine learning framework
 import tensorflow as tf
+
+# Importing numpy so we can use numpy arrays
 import numpy as np
 
 # We'll use this to measure time spent in training and testing
@@ -115,14 +121,21 @@ output_path = log_path + model_name + f'/{data_set_name}/' + current_time
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 
-# Class for solving language modeling tasks, you can create a model, train it and test it
+# Class for solving language modeling tasks. You can create a model, train it and test it
 class LanguageModelingModel:
 
     def __init__(self, hidden_units):
+        """
+            This function (also a constructor) creates a machine learning model for solving the language modeling task.
+
+            Input:
+                hidden_units: int, the amount of hidden units to use for the RNN cell(s).
+        """
 
         print("\nBuilding Graph...\n")
 
-        tf.reset_default_graph()  # Build the graph
+        # Build the graph
+        tf.reset_default_graph()
 
         # Input – batch size list of integer sequences
         x = tf.placeholder(tf.int32, shape=[None, window_size], name="x")
@@ -130,10 +143,11 @@ class LanguageModelingModel:
         # Output – batch size list of integer sequences (we'll try to predict the input sequences shifted by 1)
         y = tf.placeholder(tf.int64, shape=[None, window_size], name="y")
 
-        # Bool value that tells us, whether or not are we in training
+        # Boolean value that tells us, whether or not are we in training
         training = tf.placeholder(tf.bool, name='training')
 
-        # Outer dropout probability, so we can pass different values depending on training/testing
+        # Outer dropout probability, so we can pass different values in training and in testing (while testing the
+        # dropout should be 0.)
         outer_dropout_rate = tf.placeholder(tf.float32, name='outer_dropout_rate')
 
         # Instantiate our embedding matrix
@@ -161,8 +175,8 @@ class LanguageModelingModel:
         # Extract the batch size - this allows for variable batch size
         current_batch_size = tf.shape(x)[0]
 
-        if stateful:
-            if state_is_tuple:  # LSTMs and such
+        if stateful:  # If you wanted the model to be stateful, it will need a placeholder to pass the state
+            if state_is_tuple:  # LSTMs and such (they need special treatment because they have 2 states)
                 initial_state = tf.placeholder(tf.float32,
                                                shape=[number_of_layers, 2, None, hidden_units],
                                                name="initial_state")
@@ -176,11 +190,11 @@ class LanguageModelingModel:
                                                shape=[number_of_layers, None, hidden_units],
                                                name="initial_state")
                 initial_state = tuple(tf.unstack(initial_state, axis=0))
-        else:
-            # Create the initial state of zeros
+        else:  # If you didn't, use the cell's inner zero state
             initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
 
-        # Value will have all the outputs. State contains hidden states between the steps.
+        # Value will have all the outputs.
+        # State will contain the hidden states between the time steps.
         value, state = tf.nn.dynamic_rnn(cell,
                                          embed_lookup,
                                          initial_state=initial_state,
@@ -194,7 +208,7 @@ class LanguageModelingModel:
         # Optionally apply relu activation for RRU and GRRUA cells
         # value = tf.nn.relu(value)
 
-        # Reshape the outputs – [batch_size, window_size, final_size] -> [batch_size x window_size, final_size]
+        # Reshape the outputs from [batch_size, window_size, final_size] to [batch_size x window_size, final_size]
         last = tf.reshape(value, shape=(-1, final_size))
 
         # Apply the passed dropout
@@ -203,12 +217,12 @@ class LanguageModelingModel:
         # Calculate the predictions. Final form – [batch_size x window_size, vocabulary_size]
         prediction = tf.matmul(last, weight) + bias
         # Reshape the predictions for easier further calculations
-        # [batch_size x window_size, vocabulary_size] -> [batch_size, window_size, vocabulary_size]
+        # From [batch_size x window_size, vocabulary_size] to [batch_size, window_size, vocabulary_size]
         prediction = tf.reshape(prediction, shape=(-1, window_size, vocabulary_size))
 
-        # Predictions for the second half
+        # Predictions for the second half (because we sometimes use half_perplexity for calculations)
         half = window_size // 2
-        half_prediction = prediction[:, half:, :]  # [batch_size, ceil(window_size / 2), vocabulary_size]
+        half_prediction = prediction[:, half:, :]  # It's shape - [batch_size, ceil(window_size / 2), vocabulary_size]
 
         # Accuracy for the second half
         half_y = y[:, half:]  # [batch_size, ceil(window_size / 2)]
@@ -219,17 +233,17 @@ class LanguageModelingModel:
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
         # Calculate losses given prediction and labels
-        # Loss for results (second half)
+        # Loss only used for results (second half)
         half_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=half_prediction,
                                                                                   labels=half_y))
-        # Loss for optimizing (full_length)
+        # Loss for optimizing and sometimes for results (full_length)
         loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction,
                                                                              labels=y))
 
         # Transform the loss in a format that our tasks require
-        if character_level:  # Perplexity in BPC
-            half_perplexity = tf.reduce_mean(half_loss)/np.log(2)
-            perplexity = tf.reduce_mean(loss)/np.log(2)
+        if character_level:  # Perplexity in BPC (bits per character)
+            half_perplexity = tf.reduce_mean(half_loss) / np.log(2)
+            perplexity = tf.reduce_mean(loss) / np.log(2)
         else:  # Casual perplexity
             half_perplexity = tf.exp(half_loss)
             perplexity = tf.exp(loss)
@@ -274,29 +288,47 @@ class LanguageModelingModel:
 
         print("\nGraph Built...\n")
 
-    def fit(self, training_data, validation_data):  # Trains the model
+    def fit(self, training_data, validation_data):
+        """
+            This function trains the model using the training and validation data passed.
+
+            Input:
+                training_data: list, a list of numbers to be fed in the model;
+                validation_data: list, a list of numbers to be fed in the model.
+        """
+
         tf_config = tf.ConfigProto()
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
         sess = tf.Session(config=tf_config)
+
+        # We print that the training has started
         NetworkPrint.training_start()
 
+        # We initialize the variables
         sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-        # Adding writers so we can visualize accuracy, loss, etc. on TensorBoard
+        # Adding writers so we can visualize accuracy, perplexity, etc. in TensorBoard
         merged_summary = tf.summary.merge_all()
         training_writer = tf.summary.FileWriter(output_path + "/training")
+        # Adding session graph to the writer, so we can look at it, if we want, in TensorBoard
         training_writer.add_graph(sess.graph)
 
         global fixed_batch_size
-        if stateful:  # If we are in stateful mode, we need fixed_batch_size, so the state shape stays the same
+        # If we are in stateful mode, we need fixed_batch_size, because we can't pass the previous state if it might
+        # have had a different batch_size
+        if stateful:
             fixed_batch_size = True
 
+        # For stateful and continuous_batches models, the step size has to be full window_size
+        # Otherwise we will use window_size // 2, so we can use the loss used in the latter part of the sequence (second
+        # half), because it has more context, and therefore it might have better results.
         if stateful or continuous_batches:
             training_indexes = get_window_indexes(len(training_data), window_size, window_size)
         else:
             training_indexes = get_window_indexes(len(training_data), window_size, window_size // 2)
 
+        # We calculate the number of batches
         num_training_batches = len(training_indexes) // batch_size
 
         # Variables that help implement the early stopping if no validation perplexity decrease is observed
@@ -304,8 +336,10 @@ class LanguageModelingModel:
         best_validation_perplexity = None
 
         for epoch in range(num_epochs):
+            # Print that the epoch has started
             NetworkPrint.epoch_start(epoch + 1, num_epochs)
 
+            # If necessary, shuffle data
             if shuffle_data:
                 training_indexes = shuffle(training_indexes)
 
@@ -319,14 +353,17 @@ class LanguageModelingModel:
             extra_tasks_for_perfection = not stateful and not continuous_batches
 
             for i in range(num_training_batches):
+                # Get a batch of data
                 x_batch = get_batch(training_indexes, i, batch_size, fixed_batch_size, continuous_batches)
 
+                # If the model is stateful, then we will pass it zero_state with a certain probability
                 if stateful and (np.random.uniform() < zero_state_chance or i == 0):
                     state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
 
-                # Now we have batch of integers to look in text from
+                # We get sequences from the batch, that are ready to be fed in the network
                 x_batch, y_batch = get_input_data_from_indexes(training_data, x_batch, window_size)
 
+                # If the model is stateful we need to pass the state as well
                 if stateful:
                     feed_dict = {
                         self.x: x_batch,
@@ -343,9 +380,10 @@ class LanguageModelingModel:
                         self.outer_dropout_rate: outer_dropout
                     }
 
-                # Do we need to fetch the full length stats
+                # Do we need to fetch the full length perplexity and accuracy
                 need_full = stateful or continuous_batches or i == 0
 
+                # If we need to log this batch, we also add summary to the sess.run
                 if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
                     s, _, last_state, p, a = sess.run([merged_summary,
                                                        self.optimizer,
@@ -354,6 +392,7 @@ class LanguageModelingModel:
                                                        self.accuracy if need_full else self.half_accuracy],
                                                       feed_dict=feed_dict)
 
+                    # Adding the summary to TensorBoard
                     training_writer.add_summary(s, i + epoch * num_training_batches)
                 else:
                     _, last_state, p, a = sess.run([self.optimizer,
@@ -365,26 +404,36 @@ class LanguageModelingModel:
                 # To have 100% data covered if we had step_size = window_size // 2 , we need to have full length
                 # values for first batch
                 if extra_tasks_for_perfection and i == 0:
-                    # Because we went through 2 halves, to have fair average we need extra addition, but we will
-                    # have to divide by one more later
+                    # Because we went through 2 halves, to have fair average, we need an extra addition, but we will
+                    # have to divide the total values by one more later, when calculating the average values
                     total_training_perplexity += p
                     total_training_accuracy += a
 
+                # Setting the state as the one passed from the model (if the model is stateful, we might pass it)
                 state = last_state
 
                 total_training_perplexity += p
                 total_training_accuracy += a
 
+                # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
+                # to print in
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                         or i == num_training_batches - 1:
-                    NetworkPrint.step_results(i + 1, num_training_batches, [["Perplexity", p], ["Accuracy", a]], time.time() - start_time)
+                    NetworkPrint.step_results(i + 1, num_training_batches, [["Perplexity", p], ["Accuracy", a]],
+                                              time.time() - start_time)
 
+            # By how much we need to divide the total values to get the average values
             statistics_count = (num_training_batches + 1) if extra_tasks_for_perfection else num_training_batches
+
             average_training_perplexity = total_training_perplexity / statistics_count
             average_training_accuracy = total_training_accuracy / statistics_count
+
+            # Print the stats gained in the epoch
             NetworkPrint.epoch_end(epoch + 1,
                                    [["Average perplexity", average_training_perplexity],
                                     ["Average accuracy", average_training_accuracy]], time.time() - start_time)
+
+            # Add perplexity and accuracy to TensorBoard
 
             epoch_perplexity_summary = tf.Summary()
             epoch_perplexity_summary.value.add(tag='epoch_perplexity', simple_value=average_training_perplexity)
@@ -395,16 +444,18 @@ class LanguageModelingModel:
             training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
             training_writer.flush()
 
+            # Run the evaluate function, to get the average perplexity on validation data
             average_validation_perplexity = self.evaluate(validation_data, "validation", sess, epoch + 1)
 
-            # Training and validation for epoch is done, check if validation perplexity was better this epoch
+            # Training and validation for the epoch is done, check if the validation perplexity was better in this epoch
+            # than in the last one
             if best_validation_perplexity is None or average_validation_perplexity < best_validation_perplexity:
                 print(f"&&& New best validation perplexity - before: {best_validation_perplexity};"
                       f" after: {average_validation_perplexity} - saving model...")
 
                 best_validation_perplexity = average_validation_perplexity
 
-                # Save checkpoint
+                # Save the model
                 save_model(sess, ckpt_path, model_name)
 
                 epochs_no_gain = 0
@@ -414,29 +465,53 @@ class LanguageModelingModel:
                 print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs,"
                       f" breaking at {break_epochs_no_gain} epochs.")
 
+                # The perplexity wasn't decreasing for break_epochs_no_gain times in a row, so we need to stop the
+                # training
                 if epochs_no_gain == break_epochs_no_gain:
                     print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
                     return
 
-    def evaluate(self, data, mode="testing", session=None, iterator=1):  # Tests the model
+    def evaluate(self, data, mode="testing", session=None, iterator=1):
+        """
+            This function tests the model with the passed data.
+
+            Input:
+                data: list, a list of numbers to be fed in the model;
+                mode: string, what mode are we running the function with;
+                session: tf.Session, we pass the session for the validation checks, so we don't have to save the model;
+                iterator: int, we pass the epoch's number for the validation checks.
+
+            Output:
+                average_perplexity: float, the average perplexity gained after evaluating that passed data.
+        """
+
+        # Check if the passed mode is validation or testing
         assert mode in ["validation", "testing"], "Mode must be \"validation\" or \"testing\""
-        if mode == "validation":
+
+        if mode == "validation":  # If the validation mode was on, we use the passed session
+            # We print that the validation has started
             NetworkPrint.validation_start(iterator)
             sess = session
-        else:
+        else:  # If the testing mode was on, we create a new session
             sess = tf.Session()
+
+            # We print that the testing has started
             NetworkPrint.testing_start()
 
+            # We initialize the variables
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-            # Restore session
+            # Restore the session
             restore_model(sess, ckpt_path)
 
-        # Adding a writer so we can visualize accuracy, loss, etc. on TensorBoard
+        # Adding a writer so we can visualize accuracy, perplexity, etc. on TensorBoard
         writer = tf.summary.FileWriter(output_path + f"/{mode}")
 
+        # We get the indexes of the data, we use step_size = window_size // 2, because for testing we will want to use
+        # the half metric results
         indexes = get_window_indexes(len(data), window_size, window_size // 2)
 
+        # We calculate the number of batches
         num_batches = len(indexes) // batch_size
 
         total_perplexity = 0
@@ -445,11 +520,15 @@ class LanguageModelingModel:
         start_time = time.time()
 
         for i in range(num_batches):
+            # Get a batch of data
             x_batch = get_batch(indexes, i, batch_size, fixed_batch_size, continuous_batches)
 
-            # Now we have batch of integers to look in text from
+            # We getsequences from the indexes, that we will be able to feed in the network
             x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
 
+            # If the model is stateful we will not feed it the old state, because for validation and testing we will
+            # always use half metric calculations, but the model expects a state to be fed in, so we always pass it a
+            # state filled with zeros
             if stateful:
                 state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
 
@@ -470,6 +549,7 @@ class LanguageModelingModel:
 
             if i == 0:  # To have 100% data covered we need to have full length values for first batch
                 p, a = sess.run([self.perplexity, self.accuracy], feed_dict=feed_dict)
+
                 # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
                 p = 2 * p
                 a = 2 * a
@@ -479,18 +559,24 @@ class LanguageModelingModel:
             total_perplexity += p
             total_accuracy += a
 
+            # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
+            # to print in
             if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                     or i == num_batches - 1:
                 NetworkPrint.step_results(i + 1, num_batches, [["Average perplexity", total_perplexity / (i + 2)],
                                                                ["Average accuracy", total_accuracy / (i + 2)]],
                                           time.time() - start_time)
+
         average_perplexity = total_perplexity / (num_batches + 1)
         average_accuracy = total_accuracy / (num_batches + 1)
+
+        # Print the stats gained in the evaluation phase
         NetworkPrint.evaluation_end(mode, [["Average perplexity", average_perplexity],
                                            ["Average accuracy", average_accuracy]],
                                     time.time() - start_time)
 
-        # We add this to TensorBoard so we don't have to dig in console logs and nohups
+        # We add the final perplexity and accuracy to TensorBoard so we don't have to dig into the console logs and
+        # nohup files
         perplexity_summary = tf.Summary()
         perplexity_summary.value.add(tag=f'{mode}_perplexity', simple_value=average_perplexity)
         writer.add_summary(perplexity_summary, 1)
@@ -500,35 +586,41 @@ class LanguageModelingModel:
         writer.add_summary(accuracy_summary, 1)
         writer.flush()
 
+        # We return the average perplexity (perplexity being the main metric for the language modeling data sets)
         return average_perplexity
 
 
 if __name__ == '__main__':  # Main function
+    # Load the data set with the name you specified
+    TRAINING_DATA, VALIDATION_DATA, TESTING_DATA, vocabulary_size = load_data(data_set_name)
 
-    TRAINING_DATA, VALIDATION_DATA, TESTING_DATA, vocabulary_size = load_data(data_set_name)  # Load data set
-
-    # To see how it trains in small amounts (If it's usually in a 90%/5%/5% split, now it's in a 1%/1%/1% split)
+    # To see how it trains in small amounts, you can uncomment this (if it's usually in a 90%/5%/5% split, as it is for
+    # enwik8 and text8 data sets, it now will be in a 1%/1%/1% split)
     '''
     TRAINING_DATA = TRAINING_DATA[:len(TRAINING_DATA) // 90]
     VALIDATION_DATA = VALIDATION_DATA[:len(VALIDATION_DATA) // 5]
     TESTING_DATA = TESTING_DATA[:len(TESTING_DATA) // 5]
     '''
 
-    # From which function/class we can get the model
+    # From which function / class we can get the model
     model_function = LanguageModelingModel
 
-    if not do_hyperparameter_optimization:
+    if not do_hyperparameter_optimization:  # If hyperparameter optimization is off
+        # Find the optimal hidden units to use without surpassing the number of parameters
         HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
                                                  number_of_parameters=number_of_parameters,
                                                  model_function=model_function)
 
-        MODEL = model_function(HIDDEN_UNITS)  # Create the model
+        # Create the model with the optimal hidden units
+        MODEL = model_function(HIDDEN_UNITS)
 
-        MODEL.fit(TRAINING_DATA, VALIDATION_DATA)  # Train the model (validating after each epoch)
+        # Train the model (validating after each epoch)
+        MODEL.fit(TRAINING_DATA, VALIDATION_DATA)
 
-        MODEL.evaluate(TESTING_DATA)  # Test the last saved model
-    else:
-        # hp.choice
+        # Test the last saved model
+        MODEL.evaluate(TESTING_DATA)
+    else:  # If hyperparameter optimization is on
+        # What we need to do with "hp.choice" variables
         batch_choice = [32, 64, 128]
         num_layers_choice = [1, 2, 3]
         # We need this, so we can print the hp.choice answers normally
@@ -537,9 +629,11 @@ if __name__ == '__main__':  # Main function
             'num_layers': num_layers_choice
         }
 
-        # What to do with hp.uniforms that need to be rounded
+        # Add all hp.uniform values that need to be rounded in this list (we need this, so we later can print the values
+        # rounded)
         round_uniform = ['num_params', 'out_size']
 
+        # Define the space that will be passed into the hyperopt optimizing functions
         space = [
             # hp.choice
             hp.choice('batch', batch_choice),
@@ -553,41 +647,52 @@ if __name__ == '__main__':  # Main function
 
 
         def objective(batch, num_layers, num_params, out_size, lr):
-            # For some values we need extra stuff
+            # The function inputs must be in the same order as they are specified in the space variable
+            # This function does the same steps as the above code (when hyperparameter optimization is off), but it has
+            # to set the passed variables (some of them need some additional actions) and return the metric that has to
+            # be minimized while doing the hyperparameter optimization
+
+            # We need to round some of the "hp.uniform" values
             num_params = round(num_params)
             out_size = round(out_size)
 
-            # We'll optimize these parameters
+            # We'll optimize these parameters (we need to set them globally, because we use global variables in some of
+            # the model functions, so the code is clearer and it doesn't need too many variables in each function)
             global batch_size, number_of_layers, number_of_parameters, learning_rate, output_size
             batch_size = batch
             number_of_layers = num_layers
             number_of_parameters = num_params
-            output_size = out_size
+            output_size = out_size if has_separate_output_size else None
             learning_rate = lr
 
+            # We set an output path that includes the configuration, so we can later see the values in TensorBoard
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
                           f"/batch{batch}num_layers{num_layers}num_params{num_params}out_size{out_size}lr{lr}"
 
             global HIDDEN_UNITS, model_function
-
+            # Find the optimal hidden units to use without surpassing the number of parameters
             HIDDEN_UNITS = find_optimal_hidden_units(hidden_units=HIDDEN_UNITS,
                                                      number_of_parameters=number_of_parameters,
                                                      model_function=model_function)
 
-            model = model_function(HIDDEN_UNITS)  # Create the model
+            # Create the model with the optimal hidden units
+            model = model_function(HIDDEN_UNITS)
 
-            model.fit(TRAINING_DATA, VALIDATION_DATA)  # Train the model (validating after each epoch)
+            # Train the model (validating after each epoch)
+            model.fit(TRAINING_DATA, VALIDATION_DATA)
 
-            return model.evaluate(TESTING_DATA)  # Test the last saved model (it returns testing perplexity)
+            # Test the last saved model (and return it's perplexity)
+            return model.evaluate(TESTING_DATA)
 
+        # To optimize multiple hyperparameters, we need to create this function that uses *args
         # https://github.com/hyperopt/hyperopt/issues/129
         def objective2(args):
             return objective(*args)
 
-        # Create the algorithm
+        # Create the algorithm we are going to use for hyperparameter optimization
         tpe_algo = tpe.suggest
-        # Create trials object
+        # Create a Trials object, so we can later print out configuration in each trial
         tpe_trials = Trials()
 
         # Run specified evaluations with the tpe algorithm
