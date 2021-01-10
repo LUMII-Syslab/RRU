@@ -1,3 +1,4 @@
+# This file runs all the unit tests implemented
 from sa_utils import load_data as load_imdb
 from lm_utils import load_data as load_lm_data
 from mm_utils import load_data as load_mm_data
@@ -5,6 +6,13 @@ import time
 
 
 def unit_test_1_through_9(unit_test):
+    """
+        This function unit tests load times (they must load in less than 5 minutes) for each data set, an
+
+        Input:
+            unit_test: int, unit test index to run.
+    """
+
     start_time = time.time()
 
     if unit_test == 1:
@@ -30,7 +38,7 @@ def unit_test_1_through_9(unit_test):
 
     time_taken = end_time - start_time
 
-    load_speed_in_seconds = 60 * 60  # There are 60 minutes in a hour and 60 seconds in a minute
+    load_speed_in_seconds = 5 * 60  # 5 minutes with 60 seconds each
 
     if time_taken < load_speed_in_seconds:
         print(f"Unit test {unit_test} passed! Data set loaded in {time_taken} seconds!")
