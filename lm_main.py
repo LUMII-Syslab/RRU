@@ -194,7 +194,7 @@ class LanguageModelingModel:
             initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
 
         # Value will have all the outputs.
-        # State will contain the hidden states between the time steps.
+        # State contains the final state.
         value, state = tf.nn.dynamic_rnn(cell,
                                          embed_lookup,
                                          initial_state=initial_state,
@@ -579,11 +579,11 @@ class LanguageModelingModel:
         # nohup files
         perplexity_summary = tf.Summary()
         perplexity_summary.value.add(tag=f'{mode}_perplexity', simple_value=average_perplexity)
-        writer.add_summary(perplexity_summary, 1)
+        writer.add_summary(perplexity_summary, iterator)
 
         accuracy_summary = tf.Summary()
         accuracy_summary.value.add(tag=f'{mode}_accuracy', simple_value=average_accuracy)
-        writer.add_summary(accuracy_summary, 1)
+        writer.add_summary(accuracy_summary, iterator)
         writer.flush()
 
         # We return the average perplexity (perplexity being the main metric for the language modeling data sets)

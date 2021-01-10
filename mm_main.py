@@ -154,7 +154,7 @@ class MusicModelingModel:
         initial_state = cell.zero_state(current_batch_size, dtype=tf.float32)
 
         # Value will have all the outputs.
-        # State will contain the hidden states between the time steps.
+        # State contains the final state.
         value, state = tf.nn.dynamic_rnn(cell,
                                          x,
                                          initial_state=initial_state,
