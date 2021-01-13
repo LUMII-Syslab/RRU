@@ -366,3 +366,14 @@ def get_zeros_state(number_of_layers, batch_size, hidden_units, state_is_tuple=F
         state.append(zero_state)
 
     return state
+
+
+def get_average_perplexity(total_loss, total_batches, character_level):
+    average_loss = total_loss / total_batches
+
+    if character_level:
+        perplexity = average_loss / np.log(2)
+    else:
+        perplexity = np.exp(average_loss)
+
+    return perplexity

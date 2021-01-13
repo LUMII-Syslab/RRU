@@ -17,7 +17,7 @@ from datetime import datetime
 from sklearn.utils import shuffle
 
 # Importing some functions that will help us deal with the input data
-from lm_utils import load_data, get_window_indexes, get_input_data_from_indexes, get_zeros_state
+from lm_utils import load_data, get_window_indexes, get_input_data_from_indexes, get_zeros_state, get_average_perplexity
 
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units, print_trainable_variables, get_batch, save_model, restore_model
@@ -42,7 +42,7 @@ from RAdam import RAdamOptimizer
 # Hyperparameters
 # 1. Data parameters
 # Choose data set to test on
-data_set_name = "pennchar"  # string, one of these ["enwik8", "text8", "pennchar", "penn"]
+data_set_name = "penn"  # string, one of these ["enwik8", "text8", "pennchar", "penn"]
 # How many time steps we will unroll in RNN
 # We do character-level 512, word-level 64
 window_size = 512  # int, >= 1 (if model isn't stateful or continuous_batches) else 1 or (>= 1 and % 2 == 0)
@@ -52,10 +52,10 @@ batch_size = 64  # int, >= 1
 fixed_batch_size = False  # bool
 # Should we shuffle the samples?
 # We do character-level False, word-level True
-shuffle_data = False  # bool
+shuffle_data = True  # bool
 # Should batches go continuously? This might give performance boost with a stateful RNN cell
 # We do character-level True, word-level False
-continuous_batches = True  # bool
+continuous_batches = False  # bool
 # 2. Model parameters
 # Name of the cell you want to test
 cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
@@ -78,7 +78,7 @@ clip_multiplier = 10.  # float
 embedding_size = 64  # int, >= 1
 # Should the RNN cell be stateful
 # We do character-level True, word-level False
-stateful = True  # bool
+stateful = False  # bool
 # If stateful = True, you can choose a chance that zero_state will be passed instead of last state
 zero_state_chance = 0.1  # float, 0 <= value <= 1
 # What dropout should we apply over the RNN output
@@ -115,7 +115,7 @@ if not has_separate_output_size:
 
 # Calculating the path, in which we will store the logs
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")  # We put current time in the name, so it is unique in each run
-output_path = log_path + model_name + f'/{data_set_name}/' + current_time
+output_path = log_path + model_name + f'/{data_set_name}/' + current_time + "/correct_way_question_mark_512"
 
 # Don't print TensorFlow messages, that we don't need
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
@@ -240,14 +240,6 @@ class LanguageModelingModel:
         loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction,
                                                                              labels=y))
 
-        # Transform the loss in a format that our tasks require
-        if character_level:  # Perplexity in BPC (bits per character)
-            half_perplexity = tf.reduce_mean(half_loss) / np.log(2)
-            perplexity = tf.reduce_mean(loss) / np.log(2)
-        else:  # Casual perplexity
-            half_perplexity = tf.exp(half_loss)
-            perplexity = tf.exp(loss)
-
         # Printing trainable variables which have "kernel" in their name
         decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
         for c in decay_vars:
@@ -263,7 +255,6 @@ class LanguageModelingModel:
         tf.summary.scalar("half_accuracy", half_accuracy)
         tf.summary.scalar("accuracy", accuracy)
         tf.summary.scalar("loss", loss)
-        tf.summary.scalar("perplexity", perplexity)
 
         # Expose symbols to class
         # Parameters, that we need public
@@ -277,10 +268,10 @@ class LanguageModelingModel:
             self.initial_state = initial_state
         # Information you can get from this graph
         self.state = state
-        self.half_perplexity = half_perplexity
-        self.perplexity = perplexity
         self.half_accuracy = half_accuracy
         self.accuracy = accuracy
+        self.half_loss = half_loss
+        self.loss = loss
         # To call the optimization step (gradient descent)
         self.optimizer = optimizer
 
@@ -343,7 +334,7 @@ class LanguageModelingModel:
             if shuffle_data:
                 training_indexes = shuffle(training_indexes)
 
-            total_training_perplexity = 0
+            total_training_loss = 0
             total_training_accuracy = 0
 
             start_time = time.time()
@@ -385,47 +376,50 @@ class LanguageModelingModel:
 
                 # If we need to log this batch, we also add summary to the sess.run
                 if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                    s, _, last_state, p, a = sess.run([merged_summary,
-                                                       self.optimizer,
-                                                       self.state,
-                                                       self.perplexity if need_full else self.half_perplexity,
-                                                       self.accuracy if need_full else self.half_accuracy],
-                                                      feed_dict=feed_dict)
+                    s, _, last_state, loss, a = sess.run([merged_summary,
+                                                          self.optimizer,
+                                                          self.state,
+                                                          self.loss if need_full else self.half_loss,
+                                                          self.accuracy if need_full else self.half_accuracy],
+                                                         feed_dict=feed_dict)
 
                     # Adding the summary to TensorBoard
                     training_writer.add_summary(s, i + epoch * num_training_batches)
                 else:
-                    _, last_state, p, a = sess.run([self.optimizer,
-                                                    self.state,
-                                                    self.perplexity if need_full else self.half_perplexity,
-                                                    self.accuracy if need_full else self.half_accuracy],
-                                                   feed_dict=feed_dict)
+                    _, last_state, loss, a = sess.run([self.optimizer,
+                                                       self.state,
+                                                       self.loss if need_full else self.half_loss,
+                                                       self.accuracy if need_full else self.half_accuracy],
+                                                      feed_dict=feed_dict)
 
                 # To have 100% data covered if we had step_size = window_size // 2 , we need to have full length
                 # values for first batch
                 if extra_tasks_for_perfection and i == 0:
                     # Because we went through 2 halves, to have fair average, we need an extra addition, but we will
                     # have to divide the total values by one more later, when calculating the average values
-                    total_training_perplexity += p
+                    total_training_loss += loss
                     total_training_accuracy += a
 
                 # Setting the state as the one passed from the model (if the model is stateful, we might pass it)
                 state = last_state
 
-                total_training_perplexity += p
+                total_training_loss += loss
                 total_training_accuracy += a
 
                 # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
                 # to print in
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                         or i == num_training_batches - 1:
-                    NetworkPrint.step_results(i + 1, num_training_batches, [["Perplexity", p], ["Accuracy", a]],
+                    NetworkPrint.step_results(i + 1,
+                                              num_training_batches,
+                                              [["Perplexity", get_average_perplexity(loss, 1, character_level)],
+                                               ["Accuracy", a]],
                                               time.time() - start_time)
 
             # By how much we need to divide the total values to get the average values
             statistics_count = (num_training_batches + 1) if extra_tasks_for_perfection else num_training_batches
 
-            average_training_perplexity = total_training_perplexity / statistics_count
+            average_training_perplexity = get_average_perplexity(total_training_loss, statistics_count, character_level)
             average_training_accuracy = total_training_accuracy / statistics_count
 
             # Print the stats gained in the epoch
@@ -514,7 +508,7 @@ class LanguageModelingModel:
         # We calculate the number of batches
         num_batches = len(indexes) // batch_size
 
-        total_perplexity = 0
+        total_loss = 0
         total_accuracy = 0
 
         start_time = time.time()
@@ -548,26 +542,29 @@ class LanguageModelingModel:
                 }
 
             if i == 0:  # To have 100% data covered we need to have full length values for first batch
-                p, a = sess.run([self.perplexity, self.accuracy], feed_dict=feed_dict)
+                loss, a = sess.run([self.loss, self.accuracy], feed_dict=feed_dict)
 
                 # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
-                p = 2 * p
+                loss = 2 * loss
                 a = 2 * a
             else:
-                p, a = sess.run([self.half_perplexity, self.half_accuracy], feed_dict=feed_dict)
+                loss, a = sess.run([self.half_loss, self.half_accuracy], feed_dict=feed_dict)
 
-            total_perplexity += p
+            total_loss += loss
             total_accuracy += a
 
             # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
             # to print in
             if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
                     or i == num_batches - 1:
-                NetworkPrint.step_results(i + 1, num_batches, [["Average perplexity", total_perplexity / (i + 2)],
-                                                               ["Average accuracy", total_accuracy / (i + 2)]],
+                NetworkPrint.step_results(i + 1,
+                                          num_batches,
+                                          [["Average perplexity",
+                                            get_average_perplexity(total_loss, i + 2, character_level)],
+                                           ["Average accuracy", total_accuracy / (i + 2)]],
                                           time.time() - start_time)
 
-        average_perplexity = total_perplexity / (num_batches + 1)
+        average_perplexity = get_average_perplexity(total_loss, num_batches + 1, character_level)
         average_accuracy = total_accuracy / (num_batches + 1)
 
         # Print the stats gained in the evaluation phase
