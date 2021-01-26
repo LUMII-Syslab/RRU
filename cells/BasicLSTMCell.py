@@ -10,6 +10,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import tensorflow as tf
 from tensorflow.python.eager import context
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
@@ -78,6 +79,8 @@ class BasicLSTMCell(LayerRNNCell):
                  forget_bias=1.0,
                  state_is_tuple=True,
                  activation=None,
+                 dropout_rate=0.2,
+                 training=False,
                  reuse=None,
                  name=None,
                  dtype=None,
@@ -126,6 +129,8 @@ class BasicLSTMCell(LayerRNNCell):
             self._activation = activations.get(activation)
         else:
             self._activation = math_ops.tanh
+        self._dropout_rate = dropout_rate
+        self._training = training
 
     @property
     def state_size(self):
@@ -166,6 +171,12 @@ class BasicLSTMCell(LayerRNNCell):
         """
         _check_rnn_cell_input_dtypes([inputs, state])
 
+        # If the cell is training, we should apply the given dropout
+        if self._training:
+            dropout_rate = self._dropout_rate
+        else:
+            dropout_rate = 0.
+
         sigmoid = math_ops.sigmoid
         one = constant_op.constant(1, dtype=dtypes.int32)
         # Parameters of gates are concatenated into one multiply for efficiency.
@@ -187,9 +198,10 @@ class BasicLSTMCell(LayerRNNCell):
         # performance improvement. So using those at the cost of readability.
         add = math_ops.add
         multiply = math_ops.multiply
+        # Also apply dropout as in paper "Recurrent Dropout without Memory Loss"
         new_c = add(
             multiply(c, sigmoid(add(f, forget_bias_tensor))),
-            multiply(sigmoid(i), self._activation(j)))
+            multiply(sigmoid(i), tf.nn.dropout(self._activation(j), rate=dropout_rate)))
         new_h = multiply(self._activation(new_c), sigmoid(o))
 
         if self._state_is_tuple:

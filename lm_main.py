@@ -45,7 +45,7 @@ from RAdam import RAdamOptimizer
 data_set_name = "penn"  # string, one of these ["enwik8", "text8", "pennchar", "penn"]
 # How many time steps we will unroll in RNN
 # We do character-level 512, word-level 64
-window_size = 512  # int, >= 1 (if model isn't stateful or continuous_batches) else 1 or (>= 1 and % 2 == 0)
+window_size = 64  # int, >= 1 (if model isn't stateful or continuous_batches) else 1 or (>= 1 and % 2 == 0)
 # How many data samples we feed in a single time
 batch_size = 64  # int, >= 1
 # Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
@@ -99,7 +99,7 @@ log_path = 'logdir_lm/'  # string
 # After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validation/testing (0 - don't print until the last step)
-print_after_this_many_steps = 1  # integer, >= 0
+print_after_this_many_steps = 100  # integer, >= 0
 
 # We need to know whether the data set is character-level or word-level
 character_level = True
@@ -115,10 +115,15 @@ if not has_separate_output_size:
 
 # Calculating the path, in which we will store the logs
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")  # We put current time in the name, so it is unique in each run
-output_path = log_path + model_name + f'/{data_set_name}/' + current_time + "/correct_way_question_mark_512"
+output_path = log_path + model_name + f'/{data_set_name}/' + current_time
 
 # Don't print TensorFlow messages, that we don't need
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
+# Things we will later remove
+z_transformations = 1
+middle_layer_size_multiplier = 2
+dropout_rate = 0.5
 
 
 # Class for solving language modeling tasks. You can create a model, train it and test it
@@ -160,7 +165,12 @@ class LanguageModelingModel:
         cells = []
         for _ in range(number_of_layers):
             if cell_name in ["RRU", "GRRUA"]:
-                cell = cell_fn(hidden_units, training=training, output_size=output_size)
+                cell = cell_fn(hidden_units,
+                               training=training,
+                               output_size=output_size,
+                               z_transformations=z_transformations,
+                               middle_layer_size_multiplier=middle_layer_size_multiplier,
+                               dropout_rate=dropout_rate)
             else:
                 cell = cell_fn(hidden_units)
             cells.append(cell)
@@ -620,10 +630,12 @@ if __name__ == '__main__':  # Main function
         # What we need to do with "hp.choice" variables
         batch_choice = [32, 64, 128]
         num_layers_choice = [1, 2, 3]
+        z_trans_choice = [1, 2, 3]
         # We need this, so we can print the hp.choice answers normally
         choices = {
             'batch': batch_choice,
-            'num_layers': num_layers_choice
+            'num_layers': num_layers_choice,
+            'z_trans': z_trans_choice
         }
 
         # Add all hp.uniform values that need to be rounded in this list (we need this, so we later can print the values
@@ -635,15 +647,18 @@ if __name__ == '__main__':  # Main function
             # hp.choice
             hp.choice('batch', batch_choice),
             hp.choice('num_layers', num_layers_choice),
+            hp.choice('z_trans', z_trans_choice),
             # hp.uniform
             hp.uniform('num_params', 12000000, 28000000),
-            hp.uniform('out_size', 128, 256),
+            hp.uniform('out_size', 64, 512),
+            hp.uniform('drop', 0, 1),
+            hp.uniform('mid_multi', 0.1, 8),
             # hp.loguniform
             hp.loguniform('lr', np.log(0.0001), np.log(0.009)),
         ]
 
 
-        def objective(batch, num_layers, num_params, out_size, lr):
+        def objective(batch, num_layers, z_trans, num_params, out_size, drop, mid_multi, lr):
             # The function inputs must be in the same order as they are specified in the space variable
             # This function does the same steps as the above code (when hyperparameter optimization is off), but it has
             # to set the passed variables (some of them need some additional actions) and return the metric that has to
@@ -662,10 +677,16 @@ if __name__ == '__main__':  # Main function
             output_size = out_size if has_separate_output_size else None
             learning_rate = lr
 
+            global z_transformations, dropout_rate, middle_layer_size_multiplier
+            z_transformations = z_trans
+            dropout_rate = drop
+            middle_layer_size_multiplier = mid_multi
+
             # We set an output path that includes the configuration, so we can later see the values in TensorBoard
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
-                          f"/batch{batch}num_layers{num_layers}num_params{num_params}out_size{out_size}lr{lr}"
+                          f"/batch{batch}num_layers{num_layers}num_params{num_params}out_size{out_size}lr{lr}" \
+                          f"z_trans{z_trans}drop{drop}mid_multi{mid_multi}"
 
             global HIDDEN_UNITS, model_function
             # Find the optimal hidden units to use without surpassing the number of parameters

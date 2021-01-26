@@ -37,6 +37,8 @@ class MogrifierLSTMCell(tf.nn.rnn_cell.RNNCell):
       initializer=None, num_proj=None,
       feature_mask_rounds=4,  # 0 in original, 6 enwik8, 4 ptbchar
       feature_mask_rank=24,  # 0 in original, 79 enwik8, 24 ptbhchar
+      dropout_rate=0.2,
+      training=False,
       tie_gates=False,
       cap_input_gate=True,
       layer_norm=False,
@@ -127,6 +129,9 @@ class MogrifierLSTMCell(tf.nn.rnn_cell.RNNCell):
     self._state_size = tf.nn.rnn_cell.LSTMStateTuple(
         num_units, self._output_size)
 
+    self._dropout_rate = dropout_rate
+    self._training = training
+
   @property
   def state_size(self):
     return self._state_size
@@ -189,6 +194,15 @@ class MogrifierLSTMCell(tf.nn.rnn_cell.RNNCell):
     num_proj = num_units if self._num_proj is None else self._num_proj
     num_inputs = input_.get_shape().with_rank(2)[1]
 
+    # If the cell is training, we should apply the given dropout
+    '''if self._training:
+      dropout_rate = self._dropout_rate
+    else:
+      dropout_rate = 0.'''
+    dropout_rate = tf.cond(self._training,
+                           lambda: self._dropout_rate,
+                           lambda: 0.)
+
     def maybe_transform(transform, x):
       if transform is None:
         return x
@@ -230,6 +244,8 @@ class MogrifierLSTMCell(tf.nn.rnn_cell.RNNCell):
       j = self._activation(j_pre)
       j = maybe_transform(self._update_transform, j)
       o = tf.sigmoid(o_pre)
+      # Apply dropout as in paper "Recurrent Dropout without Memory Loss"
+      j = tf.nn.dropout(j, rate=dropout_rate)
       if self._tie_gates:
         c = f * state.c + (1-f) * j
       else:

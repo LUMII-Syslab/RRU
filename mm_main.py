@@ -55,7 +55,7 @@ fixed_batch_size = False  # bool
 shuffle_data = True  # bool
 # 2. Model parameters
 # Name of the cell you want to test
-cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+cell_name = "MogrifierLSTM"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
 # Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
 HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
 # Number of maximum allowed trainable parameters
@@ -86,7 +86,7 @@ log_path = 'logdir_mm/'  # string
 # After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 1  # integer, >= 0
+print_after_this_many_steps = 100  # integer, >= 0
 
 # Get information about the picked cell
 cell_fn, model_name, has_separate_output_size, _ = get_cell_information(cell_name)
@@ -137,7 +137,7 @@ class MusicModelingModel:
             if cell_name in ["RRU", "GRRUA"]:
                 cell = cell_fn(hidden_units, training=training, output_size=output_size)
             else:
-                cell = cell_fn(hidden_units)
+                cell = cell_fn(hidden_units, training=training)
             cells.append(cell)
         cell = tf.contrib.rnn.MultiRNNCell(cells)
 

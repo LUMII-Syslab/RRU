@@ -10,6 +10,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import tensorflow as tf
 from tensorflow.python.eager import context
 from tensorflow.python.framework import dtypes
 from tensorflow.python.keras import activations
@@ -62,6 +63,8 @@ class GRUCell(LayerRNNCell):
     def __init__(self,
                  num_units,
                  activation=None,
+                 dropout_rate=0.2,
+                 training=False,
                  reuse=None,
                  kernel_initializer=None,
                  bias_initializer=None,
@@ -84,6 +87,8 @@ class GRUCell(LayerRNNCell):
             self._activation = activations.get(activation)
         else:
             self._activation = math_ops.tanh
+        self._dropout_rate = dropout_rate
+        self._training = training
         self._kernel_initializer = initializers.get(kernel_initializer)
         self._bias_initializer = initializers.get(bias_initializer)
 
@@ -128,12 +133,19 @@ class GRUCell(LayerRNNCell):
         """Gated recurrent unit (GRU) with nunits cells."""
         _check_rnn_cell_input_dtypes([inputs, state])
 
-        gate_inputs = math_ops.matmul(  # ( [1]??-ba-t-ch-?? x [inp+state]) o ([inp+state] x 2*state)
-            array_ops.concat([inputs, state], 1), self._gate_kernel)  # Concat gives [seq len...state len] [seq state]..
-        gate_inputs = nn_ops.bias_add(gate_inputs, self._gate_bias)  # Add bias
+        # If the cell is training, we should apply the given dropout
+        if self._training:
+            dropout_rate = self._dropout_rate
+        else:
+            dropout_rate = 0.
+
+        gate_inputs = math_ops.matmul(
+            array_ops.concat([inputs, state], 1), self._gate_kernel)
+        gate_inputs = nn_ops.bias_add(gate_inputs, self._gate_bias)
 
         value = math_ops.sigmoid(gate_inputs)  # sigmoid
-        r, u = array_ops.split(value=value, num_or_size_splits=2, axis=1)  # [5, 30] -> [5, 15]. aka get r and u faster
+
+        r, u = array_ops.split(value=value, num_or_size_splits=2, axis=1)
 
         r_state = r * state
 
@@ -142,7 +154,11 @@ class GRUCell(LayerRNNCell):
         candidate = nn_ops.bias_add(candidate, self._candidate_bias)
 
         c = self._activation(candidate)
-        new_h = u * state + (1 - u) * c  # Pretty state and c should be other way around, but heyy, who am I to say that
+
+        # Apply dropout as in paper "Recurrent Dropout without Memory Loss"
+        c = tf.nn.dropout(c, rate=dropout_rate)
+
+        new_h = u * state + (1 - u) * c
         return new_h, new_h
 
     def get_config(self):

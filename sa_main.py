@@ -65,7 +65,7 @@ clip_gradients = True  # bool,
 # If clip_gradients = True, with what multiplier should we clip them?
 clip_multiplier = 5.  # float
 # What should be the embedding size for the data (how many dimensions)?
-embedding_size = 32  # int, >= 1
+embedding_size = 64  # int, >= 1
 # 3. Training/testing process parameters
 # Choose your cell
 # How many epochs should we run?
@@ -81,7 +81,7 @@ log_path = 'logdir_sa/'  # string
 # After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 1  # integer, >= 0
+print_after_this_many_steps = 100  # integer, >= 0
 
 # There are 2 classes for sentiment analysis for the "IMDB" data set
 num_classes = 2
