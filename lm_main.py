@@ -20,7 +20,7 @@ from sklearn.utils import shuffle
 from lm_utils import load_data, get_window_indexes, get_input_data_from_indexes, get_zeros_state, get_average_perplexity
 
 # Importing some utility functions that will help us with certain tasks
-from utils import find_optimal_hidden_units, print_trainable_variables, get_batch, save_model, restore_model
+from utils import find_optimal_hidden_units, print_trainable_variables, get_batch
 from utils import print_trials_information, NetworkPrint
 
 # This function will allow us to get information about the picked cell
@@ -47,7 +47,7 @@ data_set_name = "penn"  # string, one of these ["enwik8", "text8", "pennchar", "
 # We do character-level 512, word-level 64
 window_size = 64  # int, >= 1 (if model isn't stateful or continuous_batches) else 1 or (>= 1 and % 2 == 0)
 # How many data samples we feed in a single time
-batch_size = 64  # int, >= 1
+batch_size = 128  # int, >= 1
 # Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
 fixed_batch_size = False  # bool
 # Should we shuffle the samples?
@@ -68,7 +68,7 @@ learning_rate = 0.003  # float, > 0
 # How many RNN layers should we have
 number_of_layers = 2  # int, >= 1
 # What should be the output size for the cells that have a separate output_size?
-output_size = 256  # int, >= 1 (Probably way more than 1)
+output_size = 128  # int, >= 1 (Probably way more than 1)
 # Should we clip the gradients?
 clip_gradients = True  # bool
 # If clip_gradients = True, with what multiplier should we clip them?
@@ -89,7 +89,7 @@ num_epochs = 1000000  # int, >= 1
 # After how many epochs with no performance gain should we early stop? (0 disabled)
 break_epochs_no_gain = 7  # int, >= 0
 # Should we do hyperparameter optimization?
-do_hyperparameter_optimization = False   # bool
+do_hyperparameter_optimization = True   # bool
 # How many runs should we run hyperparameter optimization
 optimization_runs = 100  # int, >= 1
 # Path, where we will save the model for further evaluating
@@ -301,204 +301,280 @@ class LanguageModelingModel:
         tf_config = tf.ConfigProto()
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
-        sess = tf.Session(config=tf_config)
+        with tf.Session(config=tf_config) as sess:
+            # We print that the training has started
+            NetworkPrint.training_start()
 
-        # We print that the training has started
-        NetworkPrint.training_start()
+            # We initialize the variables
+            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-        # We initialize the variables
-        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+            # Adding writers so we can visualize accuracy, perplexity, etc. in TensorBoard
+            merged_summary = tf.summary.merge_all()
+            training_writer = tf.summary.FileWriter(output_path + "/training")
+            validation_writer = tf.summary.FileWriter(output_path + "/validation")
+            # Adding session graph to the writer, so we can look at it, if we want, in TensorBoard
+            training_writer.add_graph(sess.graph)
 
-        # Adding writers so we can visualize accuracy, perplexity, etc. in TensorBoard
-        merged_summary = tf.summary.merge_all()
-        training_writer = tf.summary.FileWriter(output_path + "/training")
-        # Adding session graph to the writer, so we can look at it, if we want, in TensorBoard
-        training_writer.add_graph(sess.graph)
+            global fixed_batch_size
+            # If we are in stateful mode, we need fixed_batch_size, because we can't pass the previous state if it might
+            # have had a different batch_size
+            if stateful:
+                fixed_batch_size = True
 
-        global fixed_batch_size
-        # If we are in stateful mode, we need fixed_batch_size, because we can't pass the previous state if it might
-        # have had a different batch_size
-        if stateful:
-            fixed_batch_size = True
+            # For stateful and continuous_batches models, the step size has to be full window_size
+            # Otherwise we will use window_size // 2, so we can use the loss used in the latter part of the sequence
+            # (second half), because it has more context, and therefore it might have better results.
+            if stateful or continuous_batches:
+                training_indexes = get_window_indexes(len(training_data), window_size, window_size)
+            else:
+                training_indexes = get_window_indexes(len(training_data), window_size, window_size // 2)
+            # We get the indexes of the data, we use step_size = window_size // 2, because for testing we will want
+            # to use the half metric results
+            validation_indexes = get_window_indexes(len(validation_data), window_size, window_size // 2)
 
-        # For stateful and continuous_batches models, the step size has to be full window_size
-        # Otherwise we will use window_size // 2, so we can use the loss used in the latter part of the sequence (second
-        # half), because it has more context, and therefore it might have better results.
-        if stateful or continuous_batches:
-            training_indexes = get_window_indexes(len(training_data), window_size, window_size)
-        else:
-            training_indexes = get_window_indexes(len(training_data), window_size, window_size // 2)
+            # We calculate the number of batches
+            num_training_batches = len(training_indexes) // batch_size
+            num_validation_batches = len(validation_indexes) // batch_size
 
-        # We calculate the number of batches
-        num_training_batches = len(training_indexes) // batch_size
+            # Variables that help implement the early stopping if no validation perplexity decrease is observed
+            epochs_no_gain = 0
+            best_validation_perplexity = None
 
-        # Variables that help implement the early stopping if no validation perplexity decrease is observed
-        epochs_no_gain = 0
-        best_validation_perplexity = None
+            for epoch in range(num_epochs):
+                # Print that the epoch has started
+                NetworkPrint.epoch_start(epoch + 1, num_epochs)
 
-        for epoch in range(num_epochs):
-            # Print that the epoch has started
-            NetworkPrint.epoch_start(epoch + 1, num_epochs)
+                # If necessary, shuffle data
+                if shuffle_data:
+                    training_indexes = shuffle(training_indexes)
 
-            # If necessary, shuffle data
-            if shuffle_data:
-                training_indexes = shuffle(training_indexes)
+                total_training_loss = 0
+                total_training_accuracy = 0
 
-            total_training_loss = 0
-            total_training_accuracy = 0
+                start_time = time.time()
 
-            start_time = time.time()
+                state = None
 
-            state = None
+                extra_tasks_for_perfection = not stateful and not continuous_batches
 
-            extra_tasks_for_perfection = not stateful and not continuous_batches
+                for i in range(num_training_batches):
+                    # Get a batch of data
+                    x_batch = get_batch(training_indexes, i, batch_size, fixed_batch_size, continuous_batches)
 
-            for i in range(num_training_batches):
-                # Get a batch of data
-                x_batch = get_batch(training_indexes, i, batch_size, fixed_batch_size, continuous_batches)
+                    # If the model is stateful, then we will pass it zero_state with a certain probability
+                    if stateful and (np.random.uniform() < zero_state_chance or i == 0):
+                        state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
 
-                # If the model is stateful, then we will pass it zero_state with a certain probability
-                if stateful and (np.random.uniform() < zero_state_chance or i == 0):
-                    state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
+                    # We get sequences from the batch, that are ready to be fed in the network
+                    x_batch, y_batch = get_input_data_from_indexes(training_data, x_batch, window_size)
 
-                # We get sequences from the batch, that are ready to be fed in the network
-                x_batch, y_batch = get_input_data_from_indexes(training_data, x_batch, window_size)
+                    # If the model is stateful we need to pass the state as well
+                    if stateful:
+                        feed_dict = {
+                            self.x: x_batch,
+                            self.y: y_batch,
+                            self.training: True,
+                            self.outer_dropout_rate: outer_dropout,
+                            self.initial_state: state
+                        }
+                    else:
+                        feed_dict = {
+                            self.x: x_batch,
+                            self.y: y_batch,
+                            self.training: True,
+                            self.outer_dropout_rate: outer_dropout
+                        }
 
-                # If the model is stateful we need to pass the state as well
-                if stateful:
-                    feed_dict = {
-                        self.x: x_batch,
-                        self.y: y_batch,
-                        self.training: True,
-                        self.outer_dropout_rate: outer_dropout,
-                        self.initial_state: state
-                    }
-                else:
-                    feed_dict = {
-                        self.x: x_batch,
-                        self.y: y_batch,
-                        self.training: True,
-                        self.outer_dropout_rate: outer_dropout
-                    }
+                    # Do we need to fetch the full length perplexity and accuracy
+                    need_full = stateful or continuous_batches or i == 0
 
-                # Do we need to fetch the full length perplexity and accuracy
-                need_full = stateful or continuous_batches or i == 0
+                    # If we need to log this batch, we also add summary to the sess.run
+                    if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
+                        s, _, last_state, loss, a = sess.run([merged_summary,
+                                                              self.optimizer,
+                                                              self.state,
+                                                              self.loss if need_full else self.half_loss,
+                                                              self.accuracy if need_full else self.half_accuracy],
+                                                             feed_dict=feed_dict)
 
-                # If we need to log this batch, we also add summary to the sess.run
-                if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                    s, _, last_state, loss, a = sess.run([merged_summary,
-                                                          self.optimizer,
-                                                          self.state,
-                                                          self.loss if need_full else self.half_loss,
-                                                          self.accuracy if need_full else self.half_accuracy],
-                                                         feed_dict=feed_dict)
+                        # Adding the summary to TensorBoard
+                        training_writer.add_summary(s, i + epoch * num_training_batches)
+                    else:
+                        _, last_state, loss, a = sess.run([self.optimizer,
+                                                           self.state,
+                                                           self.loss if need_full else self.half_loss,
+                                                           self.accuracy if need_full else self.half_accuracy],
+                                                          feed_dict=feed_dict)
 
-                    # Adding the summary to TensorBoard
-                    training_writer.add_summary(s, i + epoch * num_training_batches)
-                else:
-                    _, last_state, loss, a = sess.run([self.optimizer,
-                                                       self.state,
-                                                       self.loss if need_full else self.half_loss,
-                                                       self.accuracy if need_full else self.half_accuracy],
-                                                      feed_dict=feed_dict)
+                    # To have 100% data covered if we had step_size = window_size // 2 , we need to have full length
+                    # values for first batch
+                    if extra_tasks_for_perfection and i == 0:
+                        # Because we went through 2 halves, to have fair average, we need an extra addition, but we will
+                        # have to divide the total values by one more later, when calculating the average values
+                        total_training_loss += loss
+                        total_training_accuracy += a
 
-                # To have 100% data covered if we had step_size = window_size // 2 , we need to have full length
-                # values for first batch
-                if extra_tasks_for_perfection and i == 0:
-                    # Because we went through 2 halves, to have fair average, we need an extra addition, but we will
-                    # have to divide the total values by one more later, when calculating the average values
+                    # Setting the state as the one passed from the model (if the model is stateful, we might pass it)
+                    state = last_state
+
                     total_training_loss += loss
                     total_training_accuracy += a
 
-                # Setting the state as the one passed from the model (if the model is stateful, we might pass it)
-                state = last_state
+                    # Print the batch results if it's the last batch or if step printing is turned on, and this is the
+                    # step to print in
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                            or i == num_training_batches - 1:
+                        NetworkPrint.step_results(i + 1,
+                                                  num_training_batches,
+                                                  [["Perplexity", get_average_perplexity(loss, 1, character_level)],
+                                                   ["Accuracy", a]],
+                                                  time.time() - start_time)
 
-                total_training_loss += loss
-                total_training_accuracy += a
+                # By how much we need to divide the total values to get the average values
+                statistics_count = (num_training_batches + 1) if extra_tasks_for_perfection else num_training_batches
 
-                # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
-                # to print in
-                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                        or i == num_training_batches - 1:
-                    NetworkPrint.step_results(i + 1,
-                                              num_training_batches,
-                                              [["Perplexity", get_average_perplexity(loss, 1, character_level)],
-                                               ["Accuracy", a]],
-                                              time.time() - start_time)
+                average_training_perplexity = get_average_perplexity(total_training_loss, statistics_count,
+                                                                     character_level)
+                average_training_accuracy = total_training_accuracy / statistics_count
 
-            # By how much we need to divide the total values to get the average values
-            statistics_count = (num_training_batches + 1) if extra_tasks_for_perfection else num_training_batches
+                # Print the stats gained in the epoch
+                NetworkPrint.epoch_end(epoch + 1,
+                                       [["Average perplexity", average_training_perplexity],
+                                        ["Average accuracy", average_training_accuracy]], time.time() - start_time)
 
-            average_training_perplexity = get_average_perplexity(total_training_loss, statistics_count, character_level)
-            average_training_accuracy = total_training_accuracy / statistics_count
+                # Add perplexity and accuracy to TensorBoard
 
-            # Print the stats gained in the epoch
-            NetworkPrint.epoch_end(epoch + 1,
-                                   [["Average perplexity", average_training_perplexity],
-                                    ["Average accuracy", average_training_accuracy]], time.time() - start_time)
+                epoch_perplexity_summary = tf.Summary()
+                epoch_perplexity_summary.value.add(tag='training_epoch_perplexity',
+                                                   simple_value=average_training_perplexity)
+                training_writer.add_summary(epoch_perplexity_summary, epoch + 1)
 
-            # Add perplexity and accuracy to TensorBoard
+                epoch_accuracy_summary = tf.Summary()
+                epoch_accuracy_summary.value.add(tag='training_epoch_accuracy', simple_value=average_training_accuracy)
+                training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+                training_writer.flush()
 
-            epoch_perplexity_summary = tf.Summary()
-            epoch_perplexity_summary.value.add(tag='epoch_perplexity', simple_value=average_training_perplexity)
-            training_writer.add_summary(epoch_perplexity_summary, epoch + 1)
+                # VALIDATION STARTS HERE
 
-            epoch_accuracy_summary = tf.Summary()
-            epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_training_accuracy)
-            training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
-            training_writer.flush()
+                # We print that the validation has started
+                NetworkPrint.validation_start(epoch + 1)
 
-            # Run the evaluate function, to get the average perplexity on validation data
-            average_validation_perplexity = self.evaluate(validation_data, "validation", sess, epoch + 1)
+                total_validation_loss = 0
+                total_validation_accuracy = 0
 
-            # Training and validation for the epoch is done, check if the validation perplexity was better in this epoch
-            # than in the last one
-            if best_validation_perplexity is None or average_validation_perplexity < best_validation_perplexity:
-                print(f"&&& New best validation perplexity - before: {best_validation_perplexity};"
-                      f" after: {average_validation_perplexity} - saving model...")
+                start_time = time.time()
 
-                best_validation_perplexity = average_validation_perplexity
+                for i in range(num_validation_batches):
+                    # Get a batch of data
+                    x_batch = get_batch(validation_indexes, i, batch_size, fixed_batch_size, continuous_batches)
 
-                # Save the model
-                save_model(sess, ckpt_path, model_name)
+                    # We getsequences from the indexes, that we will be able to feed in the network
+                    x_batch, y_batch = get_input_data_from_indexes(validation_data, x_batch, window_size)
 
-                epochs_no_gain = 0
-            elif break_epochs_no_gain >= 1:  # Validation perplexity was worse, check break_epochs_no_gain
-                epochs_no_gain += 1
+                    # If the model is stateful we will not feed it the old state, because for validation and testing we
+                    # will always use half metric calculations, but the model expects a state to be fed in, so we always
+                    # pass it a state filled with zeros
+                    if stateful:
+                        state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
 
-                print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs,"
-                      f" breaking at {break_epochs_no_gain} epochs.")
+                        feed_dict = {
+                            self.x: x_batch,
+                            self.y: y_batch,
+                            self.training: False,
+                            self.outer_dropout_rate: 0.,
+                            self.initial_state: state
+                        }
+                    else:
+                        feed_dict = {
+                            self.x: x_batch,
+                            self.y: y_batch,
+                            self.training: False,
+                            self.outer_dropout_rate: 0.
+                        }
 
-                # The perplexity wasn't decreasing for break_epochs_no_gain times in a row, so we need to stop the
-                # training
-                if epochs_no_gain == break_epochs_no_gain:
-                    print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
-                    return
+                    if i == 0:  # To have 100% data covered we need to have full length values for first batch
+                        loss, a = sess.run([self.loss, self.accuracy], feed_dict=feed_dict)
 
-    def evaluate(self, data, mode="testing", session=None, iterator=1):
+                        # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
+                        loss = 2 * loss
+                        a = 2 * a
+                    else:
+                        loss, a = sess.run([self.half_loss, self.half_accuracy], feed_dict=feed_dict)
+
+                    total_validation_loss += loss
+                    total_validation_accuracy += a
+
+                    # Print the batch results if it's the last batch or if step printing is turned on, and this is the
+                    # step to print in
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0) \
+                            or i == num_validation_batches - 1:
+                        NetworkPrint.step_results(i + 1,
+                                                  num_validation_batches,
+                                                  [["Average perplexity",
+                                                    get_average_perplexity(total_validation_loss,
+                                                                           i + 2,
+                                                                           character_level)],
+                                                   ["Average accuracy", total_validation_accuracy / (i + 2)]],
+                                                  time.time() - start_time)
+
+                average_validation_perplexity = get_average_perplexity(total_validation_loss,
+                                                                       num_validation_batches + 1, character_level)
+                average_validation_accuracy = total_validation_accuracy / (num_validation_batches + 1)
+
+                # Print the stats gained in the evaluation phase
+                NetworkPrint.evaluation_end("validation", [["Average perplexity", average_validation_perplexity],
+                                                           ["Average accuracy", average_validation_accuracy]],
+                                            time.time() - start_time)
+
+                # We add the final perplexity and accuracy to TensorBoard so we don't have to dig into the console logs
+                # and nohup files
+                perplexity_summary = tf.Summary()
+                perplexity_summary.value.add(tag=f'validation_epoch_perplexity',
+                                             simple_value=average_validation_perplexity)
+                validation_writer.add_summary(perplexity_summary, epoch + 1)
+
+                accuracy_summary = tf.Summary()
+                accuracy_summary.value.add(tag=f'validation_epoch_accuracy', simple_value=average_validation_accuracy)
+                validation_writer.add_summary(accuracy_summary, epoch + 1)
+                validation_writer.flush()
+
+                # Training and validation for the epoch is done, check if the validation perplexity was better in this
+                # epoch than in the last one
+                if best_validation_perplexity is None or average_validation_perplexity < best_validation_perplexity:
+                    print(f"&&& New best validation perplexity - before: {best_validation_perplexity};"
+                          f" after: {average_validation_perplexity} - saving model...")
+
+                    best_validation_perplexity = average_validation_perplexity
+
+                    # Save the model
+                    saver = tf.compat.v1.train.Saver()
+                    saver.save(sess, ckpt_path + model_name + ".ckpt")
+
+                    epochs_no_gain = 0
+                elif break_epochs_no_gain >= 1:  # Validation perplexity was worse, check break_epochs_no_gain
+                    epochs_no_gain += 1
+
+                    print(f"&&& No validation perplexity decrease for {epochs_no_gain} epochs,"
+                          f" breaking at {break_epochs_no_gain} epochs.")
+
+                    # The perplexity wasn't decreasing for break_epochs_no_gain times in a row, so we need to stop the
+                    # training
+                    if epochs_no_gain == break_epochs_no_gain:
+                        print(f"&&& Maximum epochs without validation perplexity decrease reached, breaking...")
+                        return
+
+    def evaluate(self, data):
         """
             This function tests the model with the passed data.
 
             Input:
-                data: list, a list of numbers to be fed in the model;
-                mode: string, what mode are we running the function with;
-                session: tf.Session, we pass the session for the validation checks, so we don't have to save the model;
-                iterator: int, we pass the epoch's number for the validation checks.
+                data: list, a list of numbers to be fed in the model.
 
             Output:
                 average_perplexity: float, the average perplexity gained after evaluating that passed data.
         """
 
-        # Check if the passed mode is validation or testing
-        assert mode in ["validation", "testing"], "Mode must be \"validation\" or \"testing\""
-
-        if mode == "validation":  # If the validation mode was on, we use the passed session
-            # We print that the validation has started
-            NetworkPrint.validation_start(iterator)
-            sess = session
-        else:  # If the testing mode was on, we create a new session
-            sess = tf.Session()
-
+        with tf.Session() as sess:
             # We print that the testing has started
             NetworkPrint.testing_start()
 
@@ -506,95 +582,99 @@ class LanguageModelingModel:
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
             # Restore the session
-            restore_model(sess, ckpt_path)
+            ckpt = tf.train.get_checkpoint_state(ckpt_path)
+            saver = tf.compat.v1.train.Saver()
+            # If there is a correct checkpoint at the path restore it
+            if ckpt and ckpt.model_checkpoint_path:
+                saver.restore(sess, ckpt.model_checkpoint_path)
 
-        # Adding a writer so we can visualize accuracy, perplexity, etc. on TensorBoard
-        writer = tf.summary.FileWriter(output_path + f"/{mode}")
+            # Adding a writer so we can visualize accuracy, perplexity, etc. on TensorBoard
+            writer = tf.summary.FileWriter(output_path + f"/testing")
 
-        # We get the indexes of the data, we use step_size = window_size // 2, because for testing we will want to use
-        # the half metric results
-        indexes = get_window_indexes(len(data), window_size, window_size // 2)
+            # We get the indexes of the data, we use step_size = window_size // 2, because for testing we will want to
+            # use the half metric results
+            indexes = get_window_indexes(len(data), window_size, window_size // 2)
 
-        # We calculate the number of batches
-        num_batches = len(indexes) // batch_size
+            # We calculate the number of batches
+            num_batches = len(indexes) // batch_size
 
-        total_loss = 0
-        total_accuracy = 0
+            total_loss = 0
+            total_accuracy = 0
 
-        start_time = time.time()
+            start_time = time.time()
 
-        for i in range(num_batches):
-            # Get a batch of data
-            x_batch = get_batch(indexes, i, batch_size, fixed_batch_size, continuous_batches)
+            for i in range(num_batches):
+                # Get a batch of data
+                x_batch = get_batch(indexes, i, batch_size, fixed_batch_size, continuous_batches)
 
-            # We getsequences from the indexes, that we will be able to feed in the network
-            x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
+                # We getsequences from the indexes, that we will be able to feed in the network
+                x_batch, y_batch = get_input_data_from_indexes(data, x_batch, window_size)
 
-            # If the model is stateful we will not feed it the old state, because for validation and testing we will
-            # always use half metric calculations, but the model expects a state to be fed in, so we always pass it a
-            # state filled with zeros
-            if stateful:
-                state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
+                # If the model is stateful we will not feed it the old state, because for validation and testing we will
+                # always use half metric calculations, but the model expects a state to be fed in, so we always pass it
+                # a state filled with zeros
+                if stateful:
+                    state = get_zeros_state(number_of_layers, len(x_batch), self.hidden_units, state_is_tuple)
 
-                feed_dict = {
-                    self.x: x_batch,
-                    self.y: y_batch,
-                    self.training: False,
-                    self.outer_dropout_rate: 0.,
-                    self.initial_state: state
-                }
-            else:
-                feed_dict = {
-                    self.x: x_batch,
-                    self.y: y_batch,
-                    self.training: False,
-                    self.outer_dropout_rate: 0.
-                }
+                    feed_dict = {
+                        self.x: x_batch,
+                        self.y: y_batch,
+                        self.training: False,
+                        self.outer_dropout_rate: 0.,
+                        self.initial_state: state
+                    }
+                else:
+                    feed_dict = {
+                        self.x: x_batch,
+                        self.y: y_batch,
+                        self.training: False,
+                        self.outer_dropout_rate: 0.
+                    }
 
-            if i == 0:  # To have 100% data covered we need to have full length values for first batch
-                loss, a = sess.run([self.loss, self.accuracy], feed_dict=feed_dict)
+                if i == 0:  # To have 100% data covered we need to have full length values for first batch
+                    loss, a = sess.run([self.loss, self.accuracy], feed_dict=feed_dict)
 
-                # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
-                loss = 2 * loss
-                a = 2 * a
-            else:
-                loss, a = sess.run([self.half_loss, self.half_accuracy], feed_dict=feed_dict)
+                    # Because we went through 2 halves, to have fair average we need * 2, but + 2 batches also
+                    loss = 2 * loss
+                    a = 2 * a
+                else:
+                    loss, a = sess.run([self.half_loss, self.half_accuracy], feed_dict=feed_dict)
 
-            total_loss += loss
-            total_accuracy += a
+                total_loss += loss
+                total_accuracy += a
 
-            # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
-            # to print in
-            if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                    or i == num_batches - 1:
-                NetworkPrint.step_results(i + 1,
-                                          num_batches,
-                                          [["Average perplexity",
-                                            get_average_perplexity(total_loss, i + 2, character_level)],
-                                           ["Average accuracy", total_accuracy / (i + 2)]],
-                                          time.time() - start_time)
+                # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
+                # to print in
+                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                        or i == num_batches - 1:
+                    NetworkPrint.step_results(i + 1,
+                                              num_batches,
+                                              [["Average perplexity",
+                                                get_average_perplexity(total_loss, i + 2, character_level)],
+                                               ["Average accuracy", total_accuracy / (i + 2)]],
+                                              time.time() - start_time)
 
-        average_perplexity = get_average_perplexity(total_loss, num_batches + 1, character_level)
-        average_accuracy = total_accuracy / (num_batches + 1)
+            average_perplexity = get_average_perplexity(total_loss, num_batches + 1, character_level)
+            average_accuracy = total_accuracy / (num_batches + 1)
 
-        # Print the stats gained in the evaluation phase
-        NetworkPrint.evaluation_end(mode, [["Average perplexity", average_perplexity],
-                                           ["Average accuracy", average_accuracy]],
-                                    time.time() - start_time)
+            # Print the stats gained in the evaluation phase
+            NetworkPrint.evaluation_end("testing", [["Average perplexity", average_perplexity],
+                                                    ["Average accuracy", average_accuracy]],
+                                        time.time() - start_time)
 
-        # We add the final perplexity and accuracy to TensorBoard so we don't have to dig into the console logs and
-        # nohup files
-        perplexity_summary = tf.Summary()
-        perplexity_summary.value.add(tag=f'{mode}_perplexity', simple_value=average_perplexity)
-        writer.add_summary(perplexity_summary, iterator)
+            # We add the final perplexity and accuracy to TensorBoard so we don't have to dig into the console logs and
+            # nohup files
+            perplexity_summary = tf.Summary()
+            perplexity_summary.value.add(tag=f'testing_perplexity', simple_value=average_perplexity)
+            writer.add_summary(perplexity_summary, 1)
 
-        accuracy_summary = tf.Summary()
-        accuracy_summary.value.add(tag=f'{mode}_accuracy', simple_value=average_accuracy)
-        writer.add_summary(accuracy_summary, iterator)
-        writer.flush()
+            accuracy_summary = tf.Summary()
+            accuracy_summary.value.add(tag=f'testing_accuracy', simple_value=average_accuracy)
+            writer.add_summary(accuracy_summary, 1)
+            writer.flush()
 
-        # We return the average perplexity (perplexity being the main metric for the language modeling data sets)
-        return average_perplexity
+            # We return the average perplexity (perplexity being the main metric for the language modeling data sets)
+            return average_perplexity
 
 
 if __name__ == '__main__':  # Main function
@@ -627,38 +707,22 @@ if __name__ == '__main__':  # Main function
         # Test the last saved model
         MODEL.evaluate(TESTING_DATA)
     else:  # If hyperparameter optimization is on
-        # What we need to do with "hp.choice" variables
-        batch_choice = [32, 64, 128]
-        num_layers_choice = [1, 2, 3]
-        z_trans_choice = [1, 2, 3]
-        # We need this, so we can print the hp.choice answers normally
-        choices = {
-            'batch': batch_choice,
-            'num_layers': num_layers_choice,
-            'z_trans': z_trans_choice
-        }
-
         # Add all hp.uniform values that need to be rounded in this list (we need this, so we later can print the values
         # rounded)
-        round_uniform = ['num_params', 'out_size']
+        round_uniform = ['num_params']
 
         # Define the space that will be passed into the hyperopt optimizing functions
         space = [
-            # hp.choice
-            hp.choice('batch', batch_choice),
-            hp.choice('num_layers', num_layers_choice),
-            hp.choice('z_trans', z_trans_choice),
             # hp.uniform
-            hp.uniform('num_params', 12000000, 28000000),
-            hp.uniform('out_size', 64, 512),
-            hp.uniform('drop', 0, 1),
-            hp.uniform('mid_multi', 0.1, 8),
+            hp.uniform('num_params', 10000000, 30000000),
+            hp.uniform('drop', 0., 0.8),
+            hp.uniform('middle', 0.1, 8.),
             # hp.loguniform
-            hp.loguniform('lr', np.log(0.0001), np.log(0.009)),
+            hp.loguniform('lr', np.log(0.0001), np.log(0.01))
         ]
 
 
-        def objective(batch, num_layers, z_trans, num_params, out_size, drop, mid_multi, lr):
+        def objective(num_params, drop, middle, lr):
             # The function inputs must be in the same order as they are specified in the space variable
             # This function does the same steps as the above code (when hyperparameter optimization is off), but it has
             # to set the passed variables (some of them need some additional actions) and return the metric that has to
@@ -666,27 +730,19 @@ if __name__ == '__main__':  # Main function
 
             # We need to round some of the "hp.uniform" values
             num_params = round(num_params)
-            out_size = round(out_size)
 
             # We'll optimize these parameters (we need to set them globally, because we use global variables in some of
             # the model functions, so the code is clearer and it doesn't need too many variables in each function)
-            global batch_size, number_of_layers, number_of_parameters, learning_rate, output_size
-            batch_size = batch
-            number_of_layers = num_layers
+            global number_of_parameters, dropout_rate, middle_layer_size_multiplier, learning_rate
             number_of_parameters = num_params
-            output_size = out_size if has_separate_output_size else None
-            learning_rate = lr
-
-            global z_transformations, dropout_rate, middle_layer_size_multiplier
-            z_transformations = z_trans
             dropout_rate = drop
-            middle_layer_size_multiplier = mid_multi
+            middle_layer_size_multiplier = middle
+            learning_rate = lr
 
             # We set an output path that includes the configuration, so we can later see the values in TensorBoard
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
-                          f"/batch{batch}num_layers{num_layers}num_params{num_params}out_size{out_size}lr{lr}" \
-                          f"z_trans{z_trans}drop{drop}mid_multi{mid_multi}"
+                          f"/num_params{num_params}drop{drop}middle{middle}lr{lr}"
 
             global HIDDEN_UNITS, model_function
             # Find the optimal hidden units to use without surpassing the number of parameters
@@ -716,7 +772,6 @@ if __name__ == '__main__':  # Main function
         # Run specified evaluations with the tpe algorithm
         tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=optimization_runs)
 
-        print_trials_information(tpe_trials,
-                                 hyperopt_choices=choices,
+        print_trials_information(hyperopt_trials=tpe_trials,
                                  round_uniform=round_uniform,
                                  metric="Perplexity")

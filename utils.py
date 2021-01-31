@@ -320,41 +320,6 @@ def get_batch(data, current_batch_index, batch_size, fixed_batch_size=True, cont
     return batch
 
 
-def save_model(sess, ckpt_path, model_name):
-    """
-        This function saves the model's session, so it can be restored later.
-
-        Input:
-            sess: tf.Session, the model's session;
-            ckpt_path: string, the path to the checkpoint;
-            model_name: string, the name of the model.
-    """
-
-    # Create a saver
-    saver = tf.compat.v1.train.Saver()
-
-    # Save the model's session in the calculated path
-    saver.save(sess, ckpt_path + model_name + ".ckpt")
-
-
-def restore_model(sess, ckpt_path):
-    """
-        This function restores a saved model, if it exists.
-
-        Input:
-            sess: tf.Session, the model's session;
-            ckpt_path: string, the path to the checkpoint.
-    """
-
-    # Get the checkpoint and create a saver
-    ckpt = tf.train.get_checkpoint_state(ckpt_path)
-    saver = tf.compat.v1.train.Saver()
-
-    # If there is a correct checkpoint at the path, restore it
-    if ckpt and ckpt.model_checkpoint_path:
-        saver.restore(sess, ckpt.model_checkpoint_path)
-
-
 # Class for printing training / validation and testing information
 class NetworkPrint:
 

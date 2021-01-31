@@ -20,7 +20,7 @@ from sklearn.utils import shuffle
 from mm_utils import load_data, split_data_in_parts
 
 # Importing some utility functions that will help us with certain tasks
-from utils import find_optimal_hidden_units, print_trainable_variables, get_batch, save_model, restore_model
+from utils import find_optimal_hidden_units, print_trainable_variables, get_batch
 from utils import print_trials_information, NetworkPrint
 
 # This function will allow us to get information about the picked cell
@@ -55,7 +55,7 @@ fixed_batch_size = False  # bool
 shuffle_data = True  # bool
 # 2. Model parameters
 # Name of the cell you want to test
-cell_name = "MogrifierLSTM"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
 # Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
 HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
 # Number of maximum allowed trainable parameters
@@ -65,7 +65,7 @@ learning_rate = 0.001  # float, > 0
 # How many RNN layers should we have
 number_of_layers = 1  # int, >= 1
 # What should be the output size for the cells that have a separate output_size?
-output_size = 256  # int, >= 1 (Probably way more than 1)
+output_size = 64  # int, >= 1 (Probably way more than 1)
 # Should we clip the gradients?
 clip_gradients = True  # bool,
 # If clip_gradients = True, with what multiplier should we clip them?
@@ -76,7 +76,7 @@ num_epochs = 1000000  # int, >= 1
 # After how many epochs with no performance gain should we early stop? (0 disabled)
 break_epochs_no_gain = 7  # int, >= 0
 # Should we do hyperparameter optimization?
-do_hyperparameter_optimization = False  # bool
+do_hyperparameter_optimization = True  # bool
 # How many runs should we run hyperparameter optimization
 optimization_runs = 100  # int, >= 1
 # Path, where we will save the model for further evaluating
@@ -97,10 +97,15 @@ if not has_separate_output_size:
 
 # Calculating the path, in which we will store the logs
 current_time = datetime.now().strftime("%Y%m%d-%H%M%S")  # We put current time in the name, so it is unique in each run
-output_path = log_path + model_name + f'/{data_set_name}/' + current_time
+output_path = log_path + model_name + f'/{data_set_name}/' + current_time + "/drop0.5"
 
 # Don't print TensorFlow messages, that we don't need
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
+# Cell specific variables that we will delete later
+z_transformations = 1
+middle_layer_size_multiplier = 2
+dropout_rate = 0.5
 
 
 # Class for solving music modeling tasks. You can create a model, train it and test it
@@ -135,9 +140,14 @@ class MusicModelingModel:
         cells = []
         for _ in range(number_of_layers):
             if cell_name in ["RRU", "GRRUA"]:
-                cell = cell_fn(hidden_units, training=training, output_size=output_size)
-            else:
-                cell = cell_fn(hidden_units, training=training)
+                cell = cell_fn(hidden_units,
+                               training=training,
+                               z_transformations=z_transformations,
+                               output_size=output_size,
+                               middle_layer_size_multiplier=middle_layer_size_multiplier,
+                               dropout_rate=dropout_rate)
+            else:  # GRU
+                cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate)
             cells.append(cell)
         cell = tf.contrib.rnn.MultiRNNCell(cells)
 
@@ -227,48 +237,214 @@ class MusicModelingModel:
         tf_config = tf.ConfigProto()
         # tf_config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
-        sess = tf.Session(config=tf_config)
+        with tf.Session(config=tf_config) as sess:
+            # We print that the training has started
+            NetworkPrint.training_start()
 
-        # We print that the training has started
-        NetworkPrint.training_start()
+            # We initialize the variables
+            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-        # We initialize the variables
-        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+            # Adding a writer so we can visualize loss, etc. on TensorBoard
+            merged_summary = tf.summary.merge_all()
+            training_writer = tf.summary.FileWriter(output_path + "/training")
+            validation_writer = tf.summary.FileWriter(output_path + f"/validation")
+            # Adding session graph to the writer, so we can look at it, if we want, in TensorBoard
+            training_writer.add_graph(sess.graph)
 
-        # Adding a writer so we can visualize loss, etc. on TensorBoard
-        merged_summary = tf.summary.merge_all()
-        training_writer = tf.summary.FileWriter(output_path + "/training")
-        # Adding session graph to the writer, so we can look at it, if we want, in TensorBoard
-        training_writer.add_graph(sess.graph)
+            # Split the passed sequences in a format that we will be able to feed in the network
+            x_train, y_train, sequence_lengths_train = split_data_in_parts(train_data, window_size, step_size,
+                                                                           vocabulary_size)
 
-        # Split the passed sequences in a format that we will be able to feed in the network
-        x_train, y_train, sequence_lengths_train = split_data_in_parts(train_data, window_size, step_size,
-                                                                       vocabulary_size)
+            # Split the passed sequences in a format that we will be able to feed in the network
+            x_valid, y_valid, sequence_lengths_valid = split_data_in_parts(valid_data, window_size, window_size,
+                                                                           vocabulary_size)
 
-        # We calculate the number of batches
-        num_training_batches = len(x_train) // batch_size
+            # We calculate the number of batches
+            num_training_batches = len(x_train) // batch_size
+            num_validation_batches = len(x_valid) // batch_size
 
-        # Variables that help implement the early stopping if no validation loss decrease is observed
-        epochs_no_gain = 0
-        best_validation_loss = None
+            # Variables that help implement the early stopping if no validation loss decrease is observed
+            epochs_no_gain = 0
+            best_validation_loss = None
 
-        for epoch in range(num_epochs):
-            # Print that the epoch has started
-            NetworkPrint.epoch_start(epoch + 1, num_epochs)
+            for epoch in range(num_epochs):
+                # Print that the epoch has started
+                NetworkPrint.epoch_start(epoch + 1, num_epochs)
 
-            # If necessary, shuffle data
-            if shuffle_data:
-                x_train, y_train, sequence_lengths_train = shuffle(x_train, y_train, sequence_lengths_train)
+                # If necessary, shuffle data
+                if shuffle_data:
+                    x_train, y_train, sequence_lengths_train = shuffle(x_train, y_train, sequence_lengths_train)
 
-            total_training_loss = 0
+                total_training_loss = 0
+
+                start_time = time.time()
+
+                for i in range(num_training_batches):
+                    # Get a batches of data
+                    x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
+                    y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
+                    sequence_length_batch = get_batch(sequence_lengths_train, i, batch_size, fixed_batch_size)
+
+                    # We get the sequence length matrix with coefficients so we can feed it to the networks, and get a
+                    # fair loss
+                    sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
+                                                                           sequence_length_batch)
+
+                    feed_dict = {
+                        self.x: x_batch,
+                        self.y: y_batch,
+                        self.training: True,
+                        self.sequence_length_matrix: sequence_length_matrix
+                    }
+
+                    # If we need to log this batch, we also add summary to the sess.run
+                    if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
+                        s, _, loss = sess.run([merged_summary, self.optimizer, self.loss], feed_dict=feed_dict)
+
+                        # Adding the summary to TensorBoard
+                        training_writer.add_summary(s, i + epoch * num_training_batches)
+                    else:
+                        _, loss = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
+
+                    total_training_loss += loss
+
+                    # Print the batch results if it's the last batch or if step printing is turned on, and this is the
+                    # step to print in
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                            or i == num_training_batches - 1:
+                        NetworkPrint.step_results(i + 1, num_training_batches, [["Loss", loss]],
+                                                  time.time() - start_time)
+
+                average_training_loss = total_training_loss / num_training_batches
+
+                # Print the stats gained in the epoch
+                NetworkPrint.epoch_end(epoch + 1, [["Average loss", average_training_loss]], time.time() - start_time)
+
+                # Add NLL loss to to TensorBoard
+                epoch_nll_summary = tf.Summary()
+                epoch_nll_summary.value.add(tag='training_epoch_nll', simple_value=average_training_loss)
+                training_writer.add_summary(epoch_nll_summary, epoch + 1)
+                training_writer.flush()
+
+                # VALIDATION STARTS HERE
+
+                # We print that the validation has started
+                NetworkPrint.validation_start(epoch + 1)
+
+                total_validation_loss = 0
+
+                start_time = time.time()
+
+                for i in range(num_validation_batches):
+                    # Get a batches of data
+                    x_batch = get_batch(x_valid, i, batch_size, fixed_batch_size)
+                    y_batch = get_batch(y_valid, i, batch_size, fixed_batch_size)
+                    sequence_length_batch = get_batch(sequence_lengths_valid, i, batch_size, fixed_batch_size)
+
+                    # We get the sequence length matrix with coefficients so we can feed it to the networks, and get a
+                    # fair loss
+                    sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
+                                                                           sequence_length_batch)
+
+                    feed_dict = {
+                        self.x: x_batch,
+                        self.y: y_batch,
+                        self.training: False,
+                        self.sequence_length_matrix: sequence_length_matrix
+                    }
+
+                    loss = sess.run(self.loss, feed_dict=feed_dict)
+
+                    total_validation_loss += loss
+
+                    # Print the batch results if it's the last batch or if step printing is turned on, and this is the
+                    # step to print in
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0) \
+                            or i == num_validation_batches - 1:
+                        NetworkPrint.step_results(i + 1, num_validation_batches, [["Average loss",
+                                                                                   total_validation_loss / (i + 1)]],
+                                                  time.time() - start_time)
+
+                average_validation_loss = total_validation_loss / num_validation_batches
+
+                # Print the stats gained in the evaluation phase
+                NetworkPrint.evaluation_end("validation", [["Average loss", average_validation_loss]],
+                                            time.time() - start_time)
+
+                # We add the final loss to TensorBoard so we don't have to dig into the console logs and nohup files
+                loss_summary = tf.Summary()
+                loss_summary.value.add(tag=f'validation_epoch_nll', simple_value=average_validation_loss)
+                validation_writer.add_summary(loss_summary, epoch + 1)
+                validation_writer.flush()
+
+                # Training and validation for the epoch is done, check if the validation loss was better in this epoch
+                # than in the last one
+                if best_validation_loss is None or average_validation_loss < best_validation_loss:
+                    print(f"&&& New best validation loss - before: {best_validation_loss};"
+                          f" after: {average_validation_loss} - saving model...")
+
+                    best_validation_loss = average_validation_loss
+
+                    # Save the model
+                    saver = tf.compat.v1.train.Saver()
+                    saver.save(sess, ckpt_path + model_name + ".ckpt")
+
+                    epochs_no_gain = 0
+                elif break_epochs_no_gain >= 1:  # Validation loss was worse. Check if break_epochs_no_gain is on
+                    epochs_no_gain += 1
+
+                    print(f"&&& No validation loss decrease for {epochs_no_gain} epochs,"
+                          f" breaking at {break_epochs_no_gain} epochs.")
+
+                    # The loss wasn't decreasing for break_epochs_no_gain times in a row, so we need to stop the
+                    # training
+                    if epochs_no_gain == break_epochs_no_gain:
+                        print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
+                        return
+
+    def evaluate(self, data):
+        """
+            This function tests the model with the passed data.
+
+            Input:
+                data: list, a list of numbers to be fed in the model.
+
+            Output:
+                average_loss: float, the average loss (NLL) gained after evaluating that passed data.
+        """
+
+        with tf.Session() as sess:
+            # We print that the testing has started
+            NetworkPrint.testing_start()
+
+            # We initialize the variables
+            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+
+            # Restore the session
+            ckpt = tf.train.get_checkpoint_state(ckpt_path)
+            saver = tf.compat.v1.train.Saver()
+            # If there is a correct checkpoint at the path restore it
+            if ckpt and ckpt.model_checkpoint_path:
+                saver.restore(sess, ckpt.model_checkpoint_path)
+
+            # Adding a writer so we can visualize loss, accuracy, etc. on TensorBoard
+            writer = tf.summary.FileWriter(output_path + f"/testing")
+
+            # Split the passed sequences in a format that we will be able to feed in the network
+            x, y, sequence_lengths = split_data_in_parts(data, window_size, window_size, vocabulary_size)
+
+            # We calculate the number of batches
+            num_batches = len(x) // batch_size
+
+            total_loss = 0
 
             start_time = time.time()
 
-            for i in range(num_training_batches):
+            for i in range(num_batches):
                 # Get a batches of data
-                x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
-                y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
-                sequence_length_batch = get_batch(sequence_lengths_train, i, batch_size, fixed_batch_size)
+                x_batch = get_batch(x, i, batch_size, fixed_batch_size)
+                y_batch = get_batch(y, i, batch_size, fixed_batch_size)
+                sequence_length_batch = get_batch(sequence_lengths, i, batch_size, fixed_batch_size)
 
                 # We get the sequence length matrix with coefficients so we can feed it to the networks, and get a fair
                 # loss
@@ -278,152 +454,34 @@ class MusicModelingModel:
                 feed_dict = {
                     self.x: x_batch,
                     self.y: y_batch,
-                    self.training: True,
+                    self.training: False,
                     self.sequence_length_matrix: sequence_length_matrix
                 }
 
-                # If we need to log this batch, we also add summary to the sess.run
-                if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                    s, _, loss = sess.run([merged_summary, self.optimizer, self.loss], feed_dict=feed_dict)
+                loss = sess.run(self.loss, feed_dict=feed_dict)
 
-                    # Adding the summary to TensorBoard
-                    training_writer.add_summary(s, i + epoch * num_training_batches)
-                else:
-                    _, loss = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
-
-                total_training_loss += loss
+                total_loss += loss
 
                 # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
                 # to print in
                 if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                        or i == num_training_batches - 1:
-                    NetworkPrint.step_results(i + 1, num_training_batches, [["Loss", loss]], time.time() - start_time)
+                        or i == num_batches - 1:
+                    NetworkPrint.step_results(i + 1, num_batches, [["Average loss", total_loss / (i + 1)]],
+                                              time.time() - start_time)
 
-            average_training_loss = total_training_loss / num_training_batches
+            average_loss = total_loss / num_batches
 
-            # Print the stats gained in the epoch
-            NetworkPrint.epoch_end(epoch + 1, [["Average loss", average_training_loss]], time.time() - start_time)
+            # Print the stats gained in the evaluation phase
+            NetworkPrint.evaluation_end("testing", [["Average loss", average_loss]], time.time() - start_time)
 
-            # Add NLL loss to to TensorBoard
-            epoch_nll_summary = tf.Summary()
-            epoch_nll_summary.value.add(tag='epoch_nll', simple_value=average_training_loss)
-            training_writer.add_summary(epoch_nll_summary, epoch + 1)
-            training_writer.flush()
+            # We add the final loss to TensorBoard so we don't have to dig into the console logs and nohup files
+            loss_summary = tf.Summary()
+            loss_summary.value.add(tag=f'testing_nll', simple_value=average_loss)
+            writer.add_summary(loss_summary, 1)
+            writer.flush()
 
-            # Run the evaluate function, to get the average perplexity on validation data
-            average_validation_loss = self.evaluate(valid_data, "validation", sess, epoch + 1)
-
-            # Training and validation for the epoch is done, check if the validation loss was better in this epoch
-            # than in the last one
-            if best_validation_loss is None or average_validation_loss < best_validation_loss:
-                print(f"&&& New best validation loss - before: {best_validation_loss};"
-                      f" after: {average_validation_loss} - saving model...")
-
-                best_validation_loss = average_validation_loss
-
-                # Save the model
-                save_model(sess, ckpt_path, model_name)
-
-                epochs_no_gain = 0
-            elif break_epochs_no_gain >= 1:  # Validation loss was worse. Check if break_epochs_no_gain is on
-                epochs_no_gain += 1
-
-                print(f"&&& No validation loss decrease for {epochs_no_gain} epochs,"
-                      f" breaking at {break_epochs_no_gain} epochs.")
-
-                # The loss wasn't decreasing for break_epochs_no_gain times in a row, so we need to stop the training
-                if epochs_no_gain == break_epochs_no_gain:
-                    print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
-                    return
-
-    def evaluate(self, data, mode="testing", session=None, iterator=1):
-        """
-            This function tests the model with the passed data.
-
-            Input:
-                data: list, a list of numbers to be fed in the model;
-                mode: string, what mode are we running the function with;
-                session: tf.Session, we pass the session for the validation checks, so we don't have to save the model;
-                iterator: int, we pass the epoch's number for the validation checks.
-
-            Output:
-                average_loss: float, the average loss (NLL) gained after evaluating that passed data.
-        """
-
-        # Check if the passed mode is validation or testing
-        assert mode in ["validation", "testing"], "Mode must be \"validation\" or \"testing\""
-
-        if mode == "validation":  # If the validation mode was on, we use the passed session
-            # We print that the validation has started
-            NetworkPrint.validation_start(iterator)
-            sess = session
-        else:  # If the testing mode was on, we create a new session
-            sess = tf.Session()
-
-            # We print that the testing has started
-            NetworkPrint.testing_start()
-
-            # We initialize the variables
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
-
-            # Restore the session
-            restore_model(sess, ckpt_path)
-
-        # Adding a writer so we can visualize loss, accuracy, etc. on TensorBoard
-        writer = tf.summary.FileWriter(output_path + f"/{mode}")
-
-        # Split the passed sequences in a format that we will be able to feed in the network
-        x, y, sequence_lengths = split_data_in_parts(data, window_size, window_size, vocabulary_size)
-
-        # We calculate the number of batches
-        num_batches = len(x) // batch_size
-
-        total_loss = 0
-
-        start_time = time.time()
-
-        for i in range(num_batches):
-            # Get a batches of data
-            x_batch = get_batch(x, i, batch_size, fixed_batch_size)
-            y_batch = get_batch(y, i, batch_size, fixed_batch_size)
-            sequence_length_batch = get_batch(sequence_lengths, i, batch_size, fixed_batch_size)
-
-            # We get the sequence length matrix with coefficients so we can feed it to the networks, and get a fair
-            # loss
-            sequence_length_matrix = create_sequence_length_matrix(len(sequence_length_batch),
-                                                                   sequence_length_batch)
-
-            feed_dict = {
-                self.x: x_batch,
-                self.y: y_batch,
-                self.training: False,
-                self.sequence_length_matrix: sequence_length_matrix
-            }
-
-            loss = sess.run(self.loss, feed_dict=feed_dict)
-
-            total_loss += loss
-
-            # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
-            # to print in
-            if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                    or i == num_batches - 1:
-                NetworkPrint.step_results(i + 1, num_batches, [["Average loss", total_loss / (i + 1)]],
-                                          time.time() - start_time)
-
-        average_loss = total_loss / num_batches
-
-        # Print the stats gained in the evaluation phase
-        NetworkPrint.evaluation_end(mode, [["Average loss", average_loss]], time.time() - start_time)
-
-        # We add the final loss to TensorBoard so we don't have to dig into the console logs and nohup files
-        loss_summary = tf.Summary()
-        loss_summary.value.add(tag=f'{mode}_nll', simple_value=average_loss)
-        writer.add_summary(loss_summary, iterator)
-        writer.flush()
-
-        # We return the average loss (loss (NLL) being the main metric for the music modeling data sets)
-        return average_loss
+            # We return the average loss (loss (NLL) being the main metric for the music modeling data sets)
+            return average_loss
 
 
 # Creates a sequence length matrix with coefficients so we get a fair loss
@@ -483,18 +541,19 @@ if __name__ == '__main__':  # Main function
     else:  # If hyperparameter optimization is on
         # Add all hp.uniform values that need to be rounded in this list (we need this, so we later can print the values
         # rounded)
-        round_uniform = ['num_params', 'out_size']
+        round_uniform = ['num_params']
 
         # Define the space that will be passed into the hyperopt optimizing functions
         space = [
             # hp.uniform
             hp.uniform('num_params', 1000000, 15000000),
-            hp.uniform('out_size', 32, 256),
+            hp.uniform('drop', 0., 0.8),
+            hp.uniform('middle', 0.1, 8.),
             # hp.loguniform
-            hp.loguniform('lr', np.log(0.0004), np.log(0.004))
+            hp.loguniform('lr', np.log(0.0001), np.log(0.01))
         ]
 
-        def objective(num_params, out_size, lr):
+        def objective(num_params, drop, middle, lr):
             # The function inputs must be in the same order as they are specified in the space variable
             # This function does the same steps as the above code (when hyperparameter optimization is off), but it has
             # to set the passed variables (some of them need some additional actions) and return the metric that has to
@@ -502,19 +561,19 @@ if __name__ == '__main__':  # Main function
 
             # We need to round some of the "hp.uniform" values
             num_params = round(num_params)
-            out_size = round(out_size)
 
             # We'll optimize these parameters (we need to set them globally, because we use global variables in some of
             # the model functions, so the code is clearer and it doesn't need too many variables in each function)
-            global learning_rate, number_of_parameters, output_size
-            learning_rate = lr
+            global number_of_parameters, dropout_rate, middle_layer_size_multiplier, learning_rate
             number_of_parameters = num_params
-            output_size = out_size if has_separate_output_size else None
+            dropout_rate = drop
+            middle_layer_size_multiplier = middle
+            learning_rate = lr
 
             # We set an output path that includes the configuration, so we can later see the values in TensorBoard
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
-                          f"/num_params{num_params}out_size{out_size}lr{lr}"
+                          f"/num_params{num_params}drop{drop}middle{middle}lr{lr}"
 
             global HIDDEN_UNITS, model_function
             # Find the optimal hidden units to use without surpassing the number of parameters

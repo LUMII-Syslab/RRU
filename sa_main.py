@@ -17,7 +17,7 @@ from sklearn.utils import shuffle
 from sa_utils import load_data, get_sequence_lengths
 
 # Importing some utility functions that will help us with certain tasks
-from utils import find_optimal_hidden_units, print_trainable_variables, get_batch, save_model, restore_model
+from utils import find_optimal_hidden_units, print_trainable_variables, get_batch
 from utils import print_trials_information, NetworkPrint
 
 # This function will allow us to get information about the picked cell
@@ -69,7 +69,9 @@ embedding_size = 64  # int, >= 1
 # 3. Training/testing process parameters
 # Choose your cell
 # How many epochs should we run?
-num_epochs = 10  # int, >= 1
+num_epochs = 1000000  # int, >= 1
+# After how many epochs with no performance gain should we early stop? (0 disabled)
+break_epochs_no_gain = 3  # int, >= 0
 # Should we do hyperparameter optimization?
 do_hyperparameter_optimization = False  # bool
 # How many runs should we run hyperparameter optimization
@@ -222,101 +224,196 @@ class SentimentAnalysisModel:
 
         print("\nGraph Built...\n")
 
-    def fit(self, x_train, y_train):
+    def fit(self, x_train, y_train, x_valid, y_valid):
         """
             This function trains the model using the training data passed.
 
             Input:
                 x_train: list, a list of input sequences to be fed in the model;
-                y_train: list, a list of input sequences to be fed in the model.
+                y_train: list, a list of output sequences to be fed in the model;
+                x_valid: list, a list of input sequences to be fed in the model;
+                y_valid: list, a list of output sequences to be fed in the model.
         """
 
-        sess = tf.Session()
+        with tf.Session() as sess:
+            # We print that the training has started
+            NetworkPrint.training_start()
 
-        # We print that the training has started
-        NetworkPrint.training_start()
+            # We initialize the variables
+            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-        # We initialize the variables
-        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+            # Adding a writer so we can visualize accuracy and loss on TensorBoard
+            merged_summary = tf.summary.merge_all()
+            training_writer = tf.summary.FileWriter(output_path + "/training")
+            validation_writer = tf.summary.FileWriter(output_path + f"/validation")
+            # Adding session graph to the writer, so we can look at it, if we want, in TensorBoard
+            training_writer.add_graph(sess.graph)
 
-        # Adding a writer so we can visualize accuracy and loss on TensorBoard
-        merged_summary = tf.summary.merge_all()
-        training_writer = tf.summary.FileWriter(output_path + "/training")
-        # Adding session graph to the writer, so we can look at it, if we want, in TensorBoard
-        training_writer.add_graph(sess.graph)
+            # We calculate the number of batches
+            num_training_batches = len(x_train) // batch_size
+            num_validation_batches = len(x_valid) // batch_size
 
-        # We calculate the number of batches
-        num_batches = len(x_train) // batch_size
+            # Variables that help implement the early stopping if no validation loss decrease is observed
+            epochs_no_gain = 0
+            best_validation_accuracy = None
 
-        for epoch in range(num_epochs):
-            # Print that the epoch has started
-            NetworkPrint.epoch_start(epoch + 1, num_epochs)
+            for epoch in range(num_epochs):
+                # Print that the epoch has started
+                NetworkPrint.epoch_start(epoch + 1, num_epochs)
 
-            # If necessary, shuffle data
-            if shuffle_data:
-                x_train, y_train = shuffle(x_train, y_train)
+                # If necessary, shuffle data
+                if shuffle_data:
+                    x_train, y_train = shuffle(x_train, y_train)
 
-            total_loss = 0
-            total_accuracy = 0
+                total_training_loss = 0
+                total_training_accuracy = 0
 
-            start_time = time.time()
+                start_time = time.time()
 
-            for i in range(num_batches):
-                # Get a batches of data
-                x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
-                y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
+                for i in range(num_training_batches):
+                    # Get a batches of data
+                    x_batch = get_batch(x_train, i, batch_size, fixed_batch_size)
+                    y_batch = get_batch(y_train, i, batch_size, fixed_batch_size)
 
-                # Get the sequence lengths of the input sequences
-                sequence_lengths = get_sequence_lengths(x_batch)
+                    # Get the sequence lengths of the input sequences
+                    sequence_lengths = get_sequence_lengths(x_batch)
 
-                feed_dict = {
-                    self.x: x_batch,
-                    self.y: y_batch,
-                    self.training: True,
-                    self.sequence_length: sequence_lengths
-                }
+                    feed_dict = {
+                        self.x: x_batch,
+                        self.y: y_batch,
+                        self.training: True,
+                        self.sequence_length: sequence_lengths
+                    }
 
-                # If we need to log this batch, we also add summary to the sess.run
-                if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                    s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
-                                          feed_dict=feed_dict)
+                    # If we need to log this batch, we also add summary to the sess.run
+                    if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
+                        s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
+                                              feed_dict=feed_dict)
 
-                    # Adding the summary to TensorBoard
-                    training_writer.add_summary(s, i + epoch * num_batches)
-                else:
-                    _, l, a = sess.run([self.optimizer, self.loss, self.accuracy],
-                                       feed_dict=feed_dict)
+                        # Adding the summary to TensorBoard
+                        training_writer.add_summary(s, i + epoch * num_training_batches)
+                    else:
+                        _, l, a = sess.run([self.optimizer, self.loss, self.accuracy],
+                                           feed_dict=feed_dict)
 
-                total_loss += l
-                total_accuracy += a
+                    total_training_loss += l
+                    total_training_accuracy += a
 
-                # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
-                # to print in
-                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                        or i == num_batches - 1:
-                    NetworkPrint.step_results(i + 1, num_batches, [["Loss", l], ["Accuracy", a]],
-                                              time.time() - start_time)
+                    # Print the batch results if it's the last batch or if step printing is turned on, and this is the
+                    # step to print in
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                            or i == num_training_batches - 1:
+                        NetworkPrint.step_results(i + 1, num_training_batches, [["Loss", l], ["Accuracy", a]],
+                                                  time.time() - start_time)
 
-            average_loss = total_loss / num_batches
-            average_accuracy = total_accuracy / num_batches
+                average_training_loss = total_training_loss / num_training_batches
+                average_training_accuracy = total_training_accuracy / num_training_batches
 
-            # Print the stats gained in the epoch
-            NetworkPrint.epoch_end(epoch + 1, [["Average loss", average_loss], ["Average accuracy", average_accuracy]],
-                                   time.time() - start_time)
+                # Print the stats gained in the epoch
+                NetworkPrint.epoch_end(epoch + 1, [["Average loss", average_training_loss],
+                                                   ["Average accuracy", average_training_accuracy]],
+                                       time.time() - start_time)
 
-            # Add loss and accuracy to TensorBoard
+                # Add loss and accuracy to TensorBoard
 
-            epoch_loss_summary = tf.Summary()
-            epoch_loss_summary.value.add(tag='epoch_loss', simple_value=average_loss)
-            training_writer.add_summary(epoch_loss_summary, epoch + 1)
+                epoch_loss_summary = tf.Summary()
+                epoch_loss_summary.value.add(tag='epoch_loss', simple_value=average_training_loss)
+                training_writer.add_summary(epoch_loss_summary, epoch + 1)
 
-            epoch_accuracy_summary = tf.Summary()
-            epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_accuracy)
-            training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
-            training_writer.flush()
-        # Training ends here
-        # Save the model
-        save_model(sess, ckpt_path, model_name)
+                epoch_accuracy_summary = tf.Summary()
+                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_training_accuracy)
+                training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+                training_writer.flush()
+
+                # VALIDATION STARTS HERE
+
+                # We print that the validation has started
+                NetworkPrint.validation_start(epoch + 1)
+
+                total_validation_loss = 0
+                total_validation_accuracy = 0
+
+                start_time = time.time()
+
+                for i in range(num_validation_batches):
+                    # Get a batches of data
+                    x_batch = get_batch(x_valid, i, batch_size, fixed_batch_size)
+                    y_batch = get_batch(y_valid, i, batch_size, fixed_batch_size)
+
+                    # Get the sequence lengths of the input sequences
+                    sequence_lengths = get_sequence_lengths(x_batch)
+
+                    feed_dict = {
+                        self.x: x_batch,
+                        self.y: y_batch,
+                        self.training: True,
+                        self.sequence_length: sequence_lengths
+                    }
+
+                    # If we need to log this batch, we also add summary to the sess.run
+                    if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
+                        s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
+                                              feed_dict=feed_dict)
+
+                        # Adding the summary to TensorBoard
+                        training_writer.add_summary(s, i + epoch * num_validation_batches)
+                    else:
+                        _, l, a = sess.run([self.optimizer, self.loss, self.accuracy],
+                                           feed_dict=feed_dict)
+
+                    total_validation_loss += l
+                    total_validation_accuracy += a
+
+                    # Print the batch results if it's the last batch or if step printing is turned on, and this is the
+                    # step to print in
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0) \
+                            or i == num_validation_batches - 1:
+                        NetworkPrint.step_results(i + 1, num_validation_batches, [["Loss", l], ["Accuracy", a]],
+                                                  time.time() - start_time)
+
+                average_validation_loss = total_validation_loss / num_validation_batches
+                average_validation_accuracy = total_validation_accuracy / num_validation_batches
+
+                # Print the stats gained in the epoch
+                NetworkPrint.epoch_end(epoch + 1, [["Average loss", average_validation_loss],
+                                                   ["Average accuracy", average_validation_accuracy]],
+                                       time.time() - start_time)
+
+                # Add loss and accuracy to TensorBoard
+
+                epoch_loss_summary = tf.Summary()
+                epoch_loss_summary.value.add(tag='epoch_loss', simple_value=average_validation_loss)
+                validation_writer.add_summary(epoch_loss_summary, epoch + 1)
+
+                epoch_accuracy_summary = tf.Summary()
+                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_validation_accuracy)
+                validation_writer.add_summary(epoch_accuracy_summary, epoch + 1)
+                validation_writer.flush()
+
+                # Training and validation for the epoch is done, check if the validation loss was better in this epoch
+                # than in the last one
+                if best_validation_accuracy is None or average_validation_accuracy > best_validation_accuracy:
+                    print(f"&&& New best validation accuracy - before: {best_validation_accuracy};"
+                          f" after: {average_validation_accuracy} - saving model...")
+
+                    best_validation_accuracy = average_validation_accuracy
+
+                    # Save the model
+                    saver = tf.compat.v1.train.Saver()
+                    saver.save(sess, ckpt_path + model_name + ".ckpt")
+
+                    epochs_no_gain = 0
+                elif break_epochs_no_gain >= 1:  # Validation accuracy was worse. Check if break_epochs_no_gain is on
+                    epochs_no_gain += 1
+
+                    print(f"&&& No validation accuracy increase for {epochs_no_gain} epochs,"
+                          f" breaking at {break_epochs_no_gain} epochs.")
+
+                    # The accuracy wasn't increasing for break_epochs_no_gain times in a row, so we need to stop the
+                    # training
+                    if epochs_no_gain == break_epochs_no_gain:
+                        print(f"&&& Maximum epochs without validation loss decrease reached, breaking...")
+                        return
 
     def evaluate(self, x_test, y_test):
         """
@@ -330,78 +427,85 @@ class SentimentAnalysisModel:
                 average_loss: float, the average loss (NLL) gained after evaluating that passed data.
         """
 
-        sess = tf.Session()
+        with tf.Session() as sess:
+            # We print that the testing has started
+            NetworkPrint.testing_start()
 
-        # We print that the testing has started
-        NetworkPrint.testing_start()
+            # We initialize the variables
+            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
 
-        # We initialize the variables
-        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+            # Adding a writer so we can visualize accuracy and loss on TensorBoard
+            testing_writer = tf.summary.FileWriter(output_path + "/testing")
 
-        # Adding a writer so we can visualize accuracy and loss on TensorBoard
-        testing_writer = tf.summary.FileWriter(output_path + "/testing")
+            # Restore the session
+            ckpt = tf.train.get_checkpoint_state(ckpt_path)
+            saver = tf.compat.v1.train.Saver()
+            # If there is a correct checkpoint at the path restore it
+            if ckpt and ckpt.model_checkpoint_path:
+                saver.restore(sess, ckpt.model_checkpoint_path)
 
-        # Restore the session
-        restore_model(sess, ckpt_path)
+            # We calculate the number of batches
+            num_batches = len(x_test) // batch_size
 
-        # We calculate the number of batches
-        num_batches = len(x_test) // batch_size
+            total_loss = 0
+            total_accuracy = 0
 
-        total_loss = 0
-        total_accuracy = 0
+            start_time = time.time()
 
-        start_time = time.time()
+            for i in range(num_batches):
+                # Get a batches of data
+                x_batch = get_batch(x_test, i, batch_size, fixed_batch_size)
+                y_batch = get_batch(y_test, i, batch_size, fixed_batch_size)
 
-        for i in range(num_batches):
-            # Get a batches of data
-            x_batch = get_batch(x_test, i, batch_size, fixed_batch_size)
-            y_batch = get_batch(y_test, i, batch_size, fixed_batch_size)
+                # Get the sequence lengths of the input sequences
+                sequence_lengths = get_sequence_lengths(x_batch)
 
-            # Get the sequence lengths of the input sequences
-            sequence_lengths = get_sequence_lengths(x_batch)
+                l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch,
+                                                                       self.y: y_batch,
+                                                                       self.training: False,
+                                                                       self.sequence_length: sequence_lengths})
 
-            l, a = sess.run([self.loss, self.accuracy], feed_dict={self.x: x_batch,
-                                                                   self.y: y_batch,
-                                                                   self.training: False,
-                                                                   self.sequence_length: sequence_lengths})
+                total_loss += l
+                total_accuracy += a
 
-            total_loss += l
-            total_accuracy += a
+                # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
+                # to print in
+                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                        or i == num_batches - 1:
+                    NetworkPrint.step_results(i + 1, num_batches, [["Average loss", total_loss / (i + 1)],
+                                                                   ["Average accuracy", total_accuracy / (i + 1)]],
+                                              time.time() - start_time)
 
-            # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
-            # to print in
-            if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
-                    or i == num_batches - 1:
-                NetworkPrint.step_results(i + 1, num_batches, [["Average loss", total_loss / (i + 1)],
-                                                               ["Average accuracy", total_accuracy / (i + 1)]],
-                                          time.time() - start_time)
+            average_loss = total_loss / num_batches
+            average_accuracy = total_accuracy / num_batches
 
-        average_loss = total_loss / num_batches
-        average_accuracy = total_accuracy / num_batches
+            # Print the stats gained in the evaluation phase
+            NetworkPrint.evaluation_end("testing", [["Average loss", average_loss], ["Average accuracy", average_accuracy]],
+                                        time.time() - start_time)
 
-        # Print the stats gained in the evaluation phase
-        NetworkPrint.evaluation_end("testing", [["Average loss", average_loss], ["Average accuracy", average_accuracy]],
-                                    time.time() - start_time)
+            # We add the final loss and accuracy to TensorBoard so we don't have to dig into the console logs and nohup
+            # files
+            testing_loss_summary = tf.Summary()
+            testing_loss_summary.value.add(tag='testing_loss', simple_value=average_loss)
+            testing_writer.add_summary(testing_loss_summary, 1)
 
-        # We add the final loss and accuracy to TensorBoard so we don't have to dig into the console logs and nohup
-        # files
-        testing_loss_summary = tf.Summary()
-        testing_loss_summary.value.add(tag='testing_loss', simple_value=average_loss)
-        testing_writer.add_summary(testing_loss_summary, 1)
+            testing_accuracy_summary = tf.Summary()
+            testing_accuracy_summary.value.add(tag='testing_accuracy', simple_value=average_accuracy)
+            testing_writer.add_summary(testing_accuracy_summary, 1)
+            testing_writer.flush()
 
-        testing_accuracy_summary = tf.Summary()
-        testing_accuracy_summary.value.add(tag='testing_accuracy', simple_value=average_accuracy)
-        testing_writer.add_summary(testing_accuracy_summary, 1)
-        testing_writer.flush()
-
-        # We return the average accuracy (accuracy being the main metric for the sentiment analysis data sets)
-        return average_accuracy
+            # We return the average accuracy (accuracy being the main metric for the sentiment analysis data sets)
+            return average_accuracy
 
 
 if __name__ == '__main__':  # Main function
     # Load the IMDB data set
     X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, max_sequence_length = load_data(vocabulary_size, max_sequence_length)
 
+    validation_length = len(X_TRAIN) // 5  # 25'000 // 5 = 5'000
+    X_VALID = X_TRAIN[: -validation_length]
+    X_TRAIN = X_TRAIN[-validation_length:]
+    ####otherwya raound
     # From which function/class we can get the model
     model_function = SentimentAnalysisModel
 
