@@ -55,7 +55,7 @@ fixed_batch_size = False  # bool
 shuffle_data = True  # bool
 # 2. Model parameters
 # Name of the cell you want to test
-cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+cell_name = "MogrifierLSTM"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
 # Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
 HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
 # Number of maximum allowed trainable parameters
@@ -103,9 +103,15 @@ output_path = log_path + model_name + f'/{data_set_name}/' + current_time + "/dr
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 # Cell specific variables that we will delete later
+dropout_rate = 0.5
+# RRU
 z_transformations = 1
 middle_layer_size_multiplier = 2
-dropout_rate = 0.5
+# LSTM
+forget_bias = 1.0
+# Mogrifier LSTM
+feature_mask_rounds = 5
+feature_mask_rank = 40
 
 
 # Class for solving music modeling tasks. You can create a model, train it and test it
@@ -139,13 +145,18 @@ class MusicModelingModel:
         # Create the RNN cell, corresponding to the one you chose
         cells = []
         for _ in range(number_of_layers):
-            if cell_name in ["RRU", "GRRUA"]:
+            if cell_name in ["RRU", "GRRUA"]:  # RRU
                 cell = cell_fn(hidden_units,
                                training=training,
                                z_transformations=z_transformations,
                                output_size=output_size,
                                middle_layer_size_multiplier=middle_layer_size_multiplier,
                                dropout_rate=dropout_rate)
+            elif cell_name in ["LSTM"]:  # LSTM
+                cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate, forget_bias=forget_bias)
+            elif cell_name in ["MogrifierLSTM"]:  # Mogrifier LSTM
+                cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate,
+                               feature_mask_rank=feature_mask_rank, feature_mask_rounds=feature_mask_rounds)
             else:  # GRU
                 cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate)
             cells.append(cell)
@@ -539,21 +550,34 @@ if __name__ == '__main__':  # Main function
         # Test the last saved model
         MODEL.evaluate(TESTING_DATA)
     else:  # If hyperparameter optimization is on
+        rounds_choice = [5, 6]
+        # We need this, so we can print the hp.choice answers normally
+        choices = {
+            'rounds': rounds_choice
+        }
+
         # Add all hp.uniform values that need to be rounded in this list (we need this, so we later can print the values
         # rounded)
-        round_uniform = ['num_params']
+        round_uniform = ['num_params', 'rank']
 
         # Define the space that will be passed into the hyperopt optimizing functions
         space = [
+            # hp.choice
+            hp.choice('rounds', rounds_choice),  # Mogrifier LSTM
             # hp.uniform
             hp.uniform('num_params', 1000000, 15000000),
             hp.uniform('drop', 0., 0.8),
-            hp.uniform('middle', 0.1, 8.),
+            # hp.uniform('middle', 0.1, 8.),  # RRU
+            # hp.uniform('forget', -3., 3.),  # LSTM
+            hp.uniform('rank', 40, 90),  # Mogrifier LSTM
             # hp.loguniform
             hp.loguniform('lr', np.log(0.0001), np.log(0.01))
         ]
 
-        def objective(num_params, drop, middle, lr):
+        # def objective(num_params, drop, middle, lr):  # RRU
+        # def objective(num_params, drop, lr):  # GRU
+        # def objective(num_params, drop, forget, lr):  # LSTM
+        def objective(rounds, num_params, drop, rank, lr):  # Mogrifier LSTM
             # The function inputs must be in the same order as they are specified in the space variable
             # This function does the same steps as the above code (when hyperparameter optimization is off), but it has
             # to set the passed variables (some of them need some additional actions) and return the metric that has to
@@ -561,19 +585,29 @@ if __name__ == '__main__':  # Main function
 
             # We need to round some of the "hp.uniform" values
             num_params = round(num_params)
+            rank = round(rank)
 
             # We'll optimize these parameters (we need to set them globally, because we use global variables in some of
             # the model functions, so the code is clearer and it doesn't need too many variables in each function)
-            global number_of_parameters, dropout_rate, middle_layer_size_multiplier, learning_rate
+            # global number_of_parameters, dropout_rate, middle_layer_size_multiplier, learning_rate  # RRU
+            # global number_of_parameters, dropout_rate, learning_rate  # GRU
+            # global number_of_parameters, dropout_rate, forget_bias, learning_rate  # LSTM
+            global feature_mask_rounds, number_of_parameters, dropout_rate, feature_mask_rank, learning_rate  # Mogrifier LSTM
+            feature_mask_rounds = rounds  # Mogrifier LSTM
             number_of_parameters = num_params
             dropout_rate = drop
-            middle_layer_size_multiplier = middle
+            # middle_layer_size_multiplier = middle  # RRU
+            # forget_bias = forget  # LSTM
+            feature_mask_rank = rank  # Mogrifier LSTM
             learning_rate = lr
 
             # We set an output path that includes the configuration, so we can later see the values in TensorBoard
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
-                          f"/num_params{num_params}drop{drop}middle{middle}lr{lr}"
+                          f"/rounds{rounds}num_params{num_params}drop{drop}rank{rank}lr{lr}"  # Mogrifier LSTM
+            # f"/num_params{num_params}drop{drop}forget{forget}lr{lr}"  # LSTM
+            # f"/num_params{num_params}drop{drop}lr{lr}"  # GRU
+            # f"/num_params{num_params}drop{drop}middle{middle}lr{lr}"  # RRU
 
             global HIDDEN_UNITS, model_function
             # Find the optimal hidden units to use without surpassing the number of parameters
@@ -603,6 +637,7 @@ if __name__ == '__main__':  # Main function
         # Run specified evaluations with the tpe algorithm
         tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=optimization_runs)
 
-        print_trials_information(hyperopt_trials=tpe_trials,
+        print_trials_information(hyperopt_choices=choices,
+                                 hyperopt_trials=tpe_trials,
                                  round_uniform=round_uniform,
                                  metric="NLL")
