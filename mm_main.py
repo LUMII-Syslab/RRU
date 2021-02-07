@@ -550,15 +550,16 @@ if __name__ == '__main__':  # Main function
         # Test the last saved model
         MODEL.evaluate(TESTING_DATA)
     else:  # If hyperparameter optimization is on
-        rounds_choice = [5, 6]
+        rounds_choice = [5, 6]  # Mogrifier LSTM
         # We need this, so we can print the hp.choice answers normally
         choices = {
-            'rounds': rounds_choice
+            'rounds': rounds_choice  # Mogrifier LSTM
         }
 
         # Add all hp.uniform values that need to be rounded in this list (we need this, so we later can print the values
         # rounded)
-        round_uniform = ['num_params', 'rank']
+        # round_uniform = ['num_params']  # Everything that's not Mogrifier LSTM
+        round_uniform = ['num_params', 'rank']  # Mogrifier LSTM
 
         # Define the space that will be passed into the hyperopt optimizing functions
         space = [
@@ -585,7 +586,7 @@ if __name__ == '__main__':  # Main function
 
             # We need to round some of the "hp.uniform" values
             num_params = round(num_params)
-            rank = round(rank)
+            rank = round(rank)  # Mogrifier LSTM
 
             # We'll optimize these parameters (we need to set them globally, because we use global variables in some of
             # the model functions, so the code is clearer and it doesn't need too many variables in each function)
