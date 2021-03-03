@@ -4,6 +4,9 @@
 # Importing the machine learning framework
 import tensorflow as tf
 
+# Importing numpy so we can use numpy arrays
+import numpy as np
+
 # We'll use this to measure time spent in training and testing
 import time
 
@@ -38,9 +41,9 @@ from RAdam import RAdamOptimizer
 
 # Hyperparameters
 # 1. Data parameters
-vocabulary_size = 10000  # 24902 is the max (used to be 88583 for tfds)
+vocabulary_size = 24902  # 10000  # 24902 is the max
 # How many time steps we will unroll in RNN (IMDB has sentences with [70-2697] words) (None means max)
-max_sequence_length = 500  # int, >= 1
+max_sequence_length = 512  # int, >= 1
 # How many data samples we feed in a single time (IMDB maximum batch_size is 25000)
 batch_size = 64  # int, >= 1
 # # Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
@@ -49,7 +52,7 @@ fixed_batch_size = False  # bool
 shuffle_data = True  # bool
 # 2. Model parameters
 # Name of the cell you want to test
-cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+cell_name = "GRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
 # Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
 HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
 # Number of maximum allowed trainable parameters
@@ -59,7 +62,7 @@ learning_rate = 0.001  # float, > 0
 # How many RNN layers should we have
 number_of_layers = 2  # int, >= 1
 # What should be the output size for the cells that have a separate output_size?
-output_size = 256  # int, >= 1 (Probably way more than 1)
+output_size = 64  # int, >= 1 (Probably way more than 1)
 # Should we clip the gradients?
 clip_gradients = True  # bool,
 # If clip_gradients = True, with what multiplier should we clip them?
@@ -71,7 +74,7 @@ embedding_size = 64  # int, >= 1
 # How many epochs should we run?
 num_epochs = 1000000  # int, >= 1
 # After how many epochs with no performance gain should we early stop? (0 disabled)
-break_epochs_no_gain = 3  # int, >= 0
+break_epochs_no_gain = 5  # int, >= 0
 # Should we do hyperparameter optimization?
 do_hyperparameter_optimization = False  # bool
 # How many runs should we run hyperparameter optimization
@@ -101,6 +104,17 @@ output_path = log_path + model_name + '/IMDB/' + current_time  # IMDB while ther
 
 # Don't print TensorFlow messages, that we don't need
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
+# Things we will later remove
+dropout_rate = 0.5
+# RRU
+z_transformations = 2
+middle_layer_size_multiplier = 2
+# LSTM
+forget_bias = 1.0
+# Mogrifier LSTM
+feature_mask_rounds = 5
+feature_mask_rank = 40
 
 
 # Class for solving sentiment analysis modeling tasks. You can create a model, train it and test it
@@ -143,10 +157,20 @@ class SentimentAnalysisModel:
         # Create the RNN cell, corresponding to the one you chose, for example, RRU, GRU, LSTM, MogrifierLSTM
         cells = []
         for _ in range(number_of_layers):
-            if cell_name in ["RRU", "GRRUA"]:
-                cell = cell_fn(hidden_units, training=training, output_size=output_size)
-            else:
-                cell = cell_fn(hidden_units)
+            if cell_name in ["RRU", "GRRUA"]:  # RRU
+                cell = cell_fn(hidden_units,
+                               training=training,
+                               z_transformations=z_transformations,
+                               output_size=output_size,
+                               middle_layer_size_multiplier=middle_layer_size_multiplier,
+                               dropout_rate=dropout_rate)
+            elif cell_name in ["LSTM"]:  # LSTM
+                cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate, forget_bias=forget_bias)
+            elif cell_name in ["MogrifierLSTM"]:  # Mogrifier LSTM
+                cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate,
+                               feature_mask_rank=feature_mask_rank, feature_mask_rounds=feature_mask_rounds)
+            else:  # GRU
+                cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate)
             cells.append(cell)
         cell = tf.contrib.rnn.MultiRNNCell(cells)
 
@@ -503,9 +527,11 @@ if __name__ == '__main__':  # Main function
     X_TRAIN, Y_TRAIN, X_TEST, Y_TEST, max_sequence_length = load_data(vocabulary_size, max_sequence_length)
 
     validation_length = len(X_TRAIN) // 5  # 25'000 // 5 = 5'000
-    X_VALID = X_TRAIN[: -validation_length]
-    X_TRAIN = X_TRAIN[-validation_length:]
-    ####otherwya raound
+    X_VALID = X_TRAIN[-validation_length:]
+    Y_VALID = Y_TRAIN[-validation_length:]
+    X_TRAIN = X_TRAIN[: -validation_length]
+    Y_TRAIN = Y_TRAIN[: -validation_length]
+
     # From which function/class we can get the model
     model_function = SentimentAnalysisModel
 
@@ -519,47 +545,70 @@ if __name__ == '__main__':  # Main function
         MODEL = model_function(HIDDEN_UNITS)
 
         # Train the model
-        MODEL.fit(X_TRAIN, Y_TRAIN)
+        MODEL.fit(X_TRAIN, Y_TRAIN, X_VALID, Y_VALID)
 
         # Test the last saved model
         MODEL.evaluate(X_TEST, Y_TEST)
     else:  # If hyperparameter optimization is on
-        # This probably needs better hyperparameter config (didn't update it yet, because didn't run it yet)
-
-        # What we need to do with "hp.choice" variables
-        lr_choice = [0.1, 0.05, 0.01, 0.005, 0.001]
-        num_layers_choice = [1, 2, 3]
-        batch_choice = [1, 2, 4, 8, 16, 32, 64]
+        # rounds_choice = [5, 6]  # Mogrifier LSTM
         # We need this, so we can print the hp.choice answers normally
         choices = {
-            'lr': lr_choice,
-            'num_layers': num_layers_choice,
-            'batch': batch_choice
+            # 'rounds': rounds_choice  # Mogrifier LSTM
         }
+
+        # Add all hp.uniform values that need to be rounded in this list (we need this, so we later can print the values
+        # rounded)
+        round_uniform = ['num_params']  # Everything that's not Mogrifier LSTM
+        # round_uniform = ['num_params', 'rank']  # Mogrifier LSTM
 
         # Define the space that will be passed into the hyperopt optimizing functions
         space = [
-            hp.choice('lr', lr_choice),
-            hp.choice('num_layers', num_layers_choice),
-            hp.choice('batch', batch_choice)
+            # hp.choice
+            # hp.choice('rounds', rounds_choice),  # Mogrifier LSTM
+            # hp.uniform
+            hp.uniform('num_params', 10000000, 30000000),
+            hp.uniform('drop', 0., 0.8),
+            hp.uniform('middle', 0.1, 8.),  # RRU
+            # hp.uniform('forget', -3., 3.),  # LSTM
+            # hp.uniform('rank', 40, 90),  # Mogrifier LSTM
+            # hp.loguniform
+            hp.loguniform('lr', np.log(0.0001), np.log(0.01))
         ]
 
-        def objective(lr, num_layers, batch):
+        # def objective(num_params, drop, lr):  # GRU
+        # def objective(num_params, drop, forget, lr):  # LSTM
+        # def objective(rounds, num_params, drop, rank, lr):  # Mogrifier LSTM
+        def objective(num_params, drop, middle, lr):  # RRU
             # The function inputs must be in the same order as they are specified in the space variable
             # This function does the same steps as the above code (when hyperparameter optimization is off), but it has
             # to set the passed variables (some of them need some additional actions) and return the metric that has to
             # be minimized while doing the hyperparameter optimization
 
+            # We need to round some of the "hp.uniform" values
+            num_params = round(num_params)
+            # rank = round(rank)  # Mogrifier LSTM
+
             # We'll optimize these parameters (we need to set them globally, because we use global variables in some of
             # the model functions, so the code is clearer and it doesn't need too many variables in each function)
-            global learning_rate, number_of_layers, batch_size
+            global number_of_parameters, dropout_rate, middle_layer_size_multiplier, learning_rate  # RRU
+            # global number_of_parameters, dropout_rate, learning_rate  # GRU
+            # global number_of_parameters, dropout_rate, forget_bias, learning_rate  # LSTM
+            # global feature_mask_rounds, number_of_parameters, dropout_rate, feature_mask_rank, learning_rate  # Mogrifier LSTM
+            # feature_mask_rounds = rounds  # Mogrifier LSTM
+            number_of_parameters = num_params
+            dropout_rate = drop
+            middle_layer_size_multiplier = middle  # RRU
+            # forget_bias = forget  # LSTM
+            # feature_mask_rank = rank  # Mogrifier LSTM
             learning_rate = lr
-            number_of_layers = num_layers
-            batch_size = batch
 
             # We set an output path that includes the configuration, so we can later see the values in TensorBoard
             global output_path
-            output_path = f"{log_path}{model_name}/{current_time}/lr{lr}layers{num_layers}batch{batch}"
+            output_path = f"{log_path}{model_name}/IMDB/{current_time}" \
+                          f"/num_params{num_params}drop{drop}middle{middle}lr{lr}"  # RRU
+            # f"/rounds{rounds}num_params{num_params}drop{drop}rank{rank}lr{lr}"  # Mogrifier LSTM
+            # f"/num_params{num_params}drop{drop}forget{forget}lr{lr}"  # LSTM
+            # f"/num_params{num_params}drop{drop}lr{lr}"  # GRU
 
             global HIDDEN_UNITS, model_function
             # Find the optimal hidden units to use without surpassing the number of parameters
@@ -571,7 +620,7 @@ if __name__ == '__main__':  # Main function
             model = model_function(HIDDEN_UNITS)
 
             # Train the model
-            model.fit(X_TRAIN, Y_TRAIN)
+            model.fit(X_TRAIN, Y_TRAIN, X_VALID, Y_VALID)
 
             # Test the last saved model (it returns testing accuracy, and hyperopt needs something to minimize, so we
             # pass the negative accuracy)
@@ -590,4 +639,8 @@ if __name__ == '__main__':  # Main function
         # Run specified evaluations with the tpe algorithm
         tpe_best = fmin(fn=objective2, space=space, algo=tpe_algo, trials=tpe_trials, max_evals=optimization_runs)
 
-        print_trials_information(tpe_trials, choices, metric="Accuracy", reverse_sign=True)
+        print_trials_information(hyperopt_trials=tpe_trials,
+                                 hyperopt_choices=choices,
+                                 round_uniform=round_uniform,
+                                 metric="Accuracy",
+                                 reverse_sign=True)
