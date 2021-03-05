@@ -52,7 +52,7 @@ fixed_batch_size = False  # bool
 shuffle_data = True  # bool
 # 2. Model parameters
 # Name of the cell you want to test
-cell_name = "GRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
 # Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
 HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
 # Number of maximum allowed trainable parameters
@@ -341,11 +341,11 @@ class SentimentAnalysisModel:
                 # Add loss and accuracy to TensorBoard
 
                 epoch_loss_summary = tf.Summary()
-                epoch_loss_summary.value.add(tag='epoch_loss', simple_value=average_training_loss)
+                epoch_loss_summary.value.add(tag='training_epoch_loss', simple_value=average_training_loss)
                 training_writer.add_summary(epoch_loss_summary, epoch + 1)
 
                 epoch_accuracy_summary = tf.Summary()
-                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_training_accuracy)
+                epoch_accuracy_summary.value.add(tag='training_epoch_accuracy', simple_value=average_training_accuracy)
                 training_writer.add_summary(epoch_accuracy_summary, epoch + 1)
                 training_writer.flush()
 
@@ -360,7 +360,7 @@ class SentimentAnalysisModel:
                 start_time = time.time()
 
                 for i in range(num_validation_batches):
-                    # Get a batches of data
+                    # Get batches of data
                     x_batch = get_batch(x_valid, i, batch_size, fixed_batch_size)
                     y_batch = get_batch(y_valid, i, batch_size, fixed_batch_size)
 
@@ -370,20 +370,11 @@ class SentimentAnalysisModel:
                     feed_dict = {
                         self.x: x_batch,
                         self.y: y_batch,
-                        self.training: True,
+                        self.training: False,
                         self.sequence_length: sequence_lengths
                     }
 
-                    # If we need to log this batch, we also add summary to the sess.run
-                    if log_after_this_many_steps != 0 and i % log_after_this_many_steps == 0:
-                        s, _, l, a = sess.run([merged_summary, self.optimizer, self.loss, self.accuracy],
-                                              feed_dict=feed_dict)
-
-                        # Adding the summary to TensorBoard
-                        training_writer.add_summary(s, i + epoch * num_validation_batches)
-                    else:
-                        _, l, a = sess.run([self.optimizer, self.loss, self.accuracy],
-                                           feed_dict=feed_dict)
+                    l, a = sess.run([self.loss, self.accuracy], feed_dict=feed_dict)
 
                     total_validation_loss += l
                     total_validation_accuracy += a
@@ -406,11 +397,11 @@ class SentimentAnalysisModel:
                 # Add loss and accuracy to TensorBoard
 
                 epoch_loss_summary = tf.Summary()
-                epoch_loss_summary.value.add(tag='epoch_loss', simple_value=average_validation_loss)
+                epoch_loss_summary.value.add(tag='validation_epoch_loss', simple_value=average_validation_loss)
                 validation_writer.add_summary(epoch_loss_summary, epoch + 1)
 
                 epoch_accuracy_summary = tf.Summary()
-                epoch_accuracy_summary.value.add(tag='epoch_accuracy', simple_value=average_validation_accuracy)
+                epoch_accuracy_summary.value.add(tag='validation_epoch_accuracy', simple_value=average_validation_accuracy)
                 validation_writer.add_summary(epoch_accuracy_summary, epoch + 1)
                 validation_writer.flush()
 
