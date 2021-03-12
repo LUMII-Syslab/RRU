@@ -1,11 +1,14 @@
-import keras.backend as K
-import keras
+import tensorflow.keras.backend as K
+import tensorflow as tf
+from tensorflow.python.ops.rnn_cell_impl import LayerRNNCell
 
-
-class SRUCell(keras.layers.Layer):
+# Code adapted from https://github.com/ribeiromiranda/sru
+# Junier B Oliva, Barnabás Póczos, and Jeff Schneider. The statistical recurrent unit. In International Conference on Machine Learning, pages 2671–2680, 2017.
+# https://arxiv.org/abs/1703.00381
+class SRUCell(LayerRNNCell):
     def __init__(self, num_stats, mavg_alphas, recur_dims,
                  learn_alphas=False, linear_out=False, include_input=False,
-                 activation=keras.activations.relu, **kwargs):
+                 activation=tf.nn.relu, **kwargs):
         self._num_stats = num_stats
         #        self._output_dims = output_dims
         self._recur_dims = recur_dims
@@ -40,14 +43,14 @@ class SRUCell(keras.layers.Layer):
             self.recur_feats_matrix = self.add_weight(shape=(self.state_size, self._recur_dims), initializer='uniform',
                                                       name='recur_feats_matrix')
             self.recur_feats_bias = self.add_weight(shape=(self._recur_dims,),
-                                                    initializer=keras.initializers.Constant(0), name='recur_feats_bias')
+                                                    initializer=tf.keras.initializers.Constant(0), name='recur_feats_bias')
             # self.recur_feats_bias = K.constant([bias_start], shape=(self._recur_dims,))
 
         rows = input_shape[-1]
         if self._recur_dims > 0:
             rows += self._recur_dims
         self.stats_matrix = self.add_weight(shape=(rows, self._num_stats), initializer='uniform', name='stats_matrix')
-        self.stats_bias = self.add_weight(shape=(self._num_stats,), initializer=keras.initializers.Constant(0),
+        self.stats_bias = self.add_weight(shape=(self._num_stats,), initializer=tf.keras.initializers.Constant(0),
                                           name='stats_bias')
         # self.stats_bias = K.constant(bias_start, shape=(self._num_stats,))
 
@@ -56,7 +59,7 @@ class SRUCell(keras.layers.Layer):
             rows += input_shape[-1]
         self.output_matrix = self.add_weight(shape=(rows, self.output_size), initializer='uniform',
                                              name='output_matrix')
-        self.output_bias = self.add_weight(shape=(self.output_size,), initializer=keras.initializers.Constant(0),
+        self.output_bias = self.add_weight(shape=(self.output_size,), initializer=tf.keras.initializers.Constant(0),
                                            name='output_bias')
         # self.output_bias = K.constant(bias_start, shape=(self.output_size,))
 
@@ -93,7 +96,7 @@ class SRUCell(keras.layers.Layer):
         if not self._linear_out:
             output = self._activation(output)
 
-        return output, [out_state]
+        return output, out_state
 
     def _linear(self, args, matrix, bias):
         if type(args) == list:

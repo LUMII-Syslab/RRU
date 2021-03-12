@@ -144,6 +144,12 @@ class MusicModelingModel:
         # Batch size list of sequence multipliers, to get a fair loss
         sequence_length_matrix = tf.placeholder(tf.float32, [None, window_size], name="sequence_length_matrix")
 
+        # Some cells use output size that differs from the hidden_size. And if the cell doesn't use a different
+        # output_size, we need to make it as hidden units for the program to work.
+        final_size = output_size
+        if final_size is None:
+            final_size = hidden_units
+
         # Create the RNN cell, corresponding to the one you chose
         cells = []
         for _ in range(number_of_layers):
@@ -162,17 +168,13 @@ class MusicModelingModel:
             elif cell_name in ["SRU"]:
                 # hidden_units *= 6
                 # Where should we place hidden units?
-                cell = cell_fn(num_stats=32, mavg_alphas=[0.0, 0.1, 0.3, 0.6, 0.9, 0.9999], recur_dims=8)
+                cell = cell_fn(num_stats=hidden_units//6, mavg_alphas=[0.0, 0.1, 0.3, 0.6, 0.9, 0.9999], recur_dims=hidden_units)# hidden state should be divided by len(alphas)
+                final_size = (hidden_units//6)*6
             else:  # GRU
                 cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate)
             cells.append(cell)
         cell = tf.contrib.rnn.MultiRNNCell(cells)
 
-        # Some cells use output size that differs from the hidden_size. And if the cell doesn't use a different
-        # output_size, we need to make it as hidden units for the program to work.
-        final_size = output_size
-        if final_size is None:
-            final_size = hidden_units
 
         # Extract the batch size - this allows for variable batch size
         current_batch_size = tf.shape(x)[0]
@@ -213,15 +215,8 @@ class MusicModelingModel:
         # After the next operation, the shape will be [1]
         loss = tf.reduce_mean(loss)
 
-        # Printing trainable variables which have "kernel" in their name
-        decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
-        for c in decay_vars:
-            print(c)
-
         # Declare our optimizer, we have to check which one works better.
         optimizer = RAdamOptimizer(learning_rate=learning_rate,
-                                   L2_decay=0.0,
-                                   decay_vars=decay_vars,
                                    clip_gradients=clip_gradients, clip_multiplier=clip_multiplier).minimize(loss)
 
         # What to log to TensorBoard if a number was specified for "log_after_this_many_steps" variable
