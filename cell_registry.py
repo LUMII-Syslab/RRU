@@ -7,7 +7,7 @@ from cells.GatedRRUCell_a import RRUCell as GRRUACell
 from cells.GRUCell import GRUCell
 from cells.BasicLSTMCell import BasicLSTMCell
 from cells.MogrifierLSTMCell import MogrifierLSTMCell
-from cells.SRUCell import SRUCell
+# from cells.SRUCell import SRUCell
 
 # This dictionary holds the configuration for each cell we have implemented (each variable is explained in the function
 # below), here you can also implement your cell by adding it's configuration (cell function / class, model name, whether
@@ -44,13 +44,14 @@ cell_registry = {
         "model_name": "mogrifier_lstm_model",
         "has_separate_output_size": False,
         "state_is_tuple": True
-    },
-    "SRU": {  # SRU
-        "cell_fn": SRUCell,
-        "model_name": "sru_model",
-        "has_separate_output_size": False,
-        "state_is_tuple": False
     }
+    # ,
+    # "SRU": {  # SRU
+    #     "cell_fn": SRUCell,
+    #     "model_name": "sru_model",
+    #     "has_separate_output_size": False,
+    #     "state_is_tuple": False
+    # }
 }
 
 

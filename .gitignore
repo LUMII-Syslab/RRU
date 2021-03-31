@@ -5,9 +5,11 @@ ckpt_sa
 ckpt_lm
 ckpt_music
 ckpt_mm
+ckpt_mnist
 logdir_imdb
 logdir_sa
 logdir_lm
 logdir_music
 logdir_mm
+logdir_mnist
 data

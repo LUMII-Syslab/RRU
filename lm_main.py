@@ -42,29 +42,29 @@ from RAdam import RAdamOptimizer
 # Hyperparameters
 # 1. Data parameters
 # Choose data set to test on
-data_set_name = "penn"  # string, one of these ["enwik8", "text8", "pennchar", "penn"]
+data_set_name = "enwik8"  # string, one of these ["enwik8", "text8", "pennchar", "penn"]
 # How many time steps we will unroll in RNN
 # We do character-level 512, word-level 64
-window_size = 64  # int, >= 1 (if model isn't stateful or continuous_batches) else 1 or (>= 1 and % 2 == 0)
+window_size = 512  # int, >= 1 (if model isn't stateful or continuous_batches) else 1 or (>= 1 and % 2 == 0)
 # How many data samples we feed in a single time
-batch_size = 128  # int, >= 1
+batch_size = 64  # int, >= 1
 # Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
 fixed_batch_size = False  # bool
 # Should we shuffle the samples?
 # We do character-level False, word-level True
-shuffle_data = True  # bool
+shuffle_data = False  # bool
 # Should batches go continuously? This might give performance boost with a stateful RNN cell
 # We do character-level True, word-level False
-continuous_batches = False  # bool
+continuous_batches = True  # bool
 # 2. Model parameters
 # Name of the cell you want to test
-cell_name = "MogrifierLSTM"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
 # Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
 HIDDEN_UNITS = 1024  # int, >= 1 (Probably way more than 1)
 # Number of maximum allowed trainable parameters
-number_of_parameters = 20000000  # int, >= 1 (Probably way more than 1)
+number_of_parameters = 48000000  # int, >= 1 (Probably way more than 1)
 # With what learning rate we optimize the model
-learning_rate = 0.003  # float, > 0
+learning_rate = 0.001  # float, > 0
 # How many RNN layers should we have
 number_of_layers = 2  # int, >= 1
 # What should be the output size for the cells that have a separate output_size?
@@ -75,10 +75,10 @@ clip_gradients = True  # bool
 clip_multiplier = 10.  # float
 # What should be the embedding size for the data (how many dimensions)?
 # We do PTB character-level 16, PTB word-level 64
-embedding_size = 64  # int, >= 1
+embedding_size = 32  # int, >= 1
 # Should the RNN cell be stateful
 # We do character-level True, word-level False
-stateful = False  # bool
+stateful = True  # bool
 # If stateful = True, you can choose a chance that zero_state will be passed instead of last state
 zero_state_chance = 0.1  # float, 0 <= value <= 1
 # What dropout should we apply over the RNN output
@@ -87,9 +87,9 @@ outer_dropout = 0  # float, 0 <= value <= 1
 # How many epochs should we run?
 num_epochs = 1000000  # int, >= 1
 # After how many epochs with no performance gain should we early stop? (0 disabled)
-break_epochs_no_gain = 7  # int, >= 0
+break_epochs_no_gain = 11  # int, >= 0
 # Should we do hyperparameter optimization?
-do_hyperparameter_optimization = True   # bool
+do_hyperparameter_optimization = False  # bool
 # How many runs should we run hyperparameter optimization
 optimization_runs = 100  # int, >= 1
 # Path, where we will save the model for further evaluating
@@ -121,15 +121,15 @@ output_path = log_path + model_name + f'/{data_set_name}/' + current_time
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 # Things we will later remove
-dropout_rate = 0.5
+dropout_rate = 0.7
 # RRU
-z_transformations = 1
-middle_layer_size_multiplier = 2
+z_transformations = 2
+middle_layer_size_multiplier = 4
 # LSTM
 forget_bias = 1.0
 # Mogrifier LSTM
-feature_mask_rounds = 5
-feature_mask_rank = 40
+feature_mask_rounds = 6
+feature_mask_rank = 79
 
 
 # Class for solving language modeling tasks. You can create a model, train it and test it
@@ -718,35 +718,35 @@ if __name__ == '__main__':  # Main function
         # Test the last saved model
         MODEL.evaluate(TESTING_DATA)
     else:  # If hyperparameter optimization is on
-        rounds_choice = [5, 6]  # Mogrifier LSTM
+        # rounds_choice = [5, 6]  # Mogrifier LSTM
         # We need this, so we can print the hp.choice answers normally
         choices = {
-            'rounds': rounds_choice  # Mogrifier LSTM
+            # 'rounds': rounds_choice  # Mogrifier LSTM
         }
 
         # Add all hp.uniform values that need to be rounded in this list (we need this, so we later can print the values
         # rounded)
-        # round_uniform = ['num_params']  # Everything that's not Mogrifier LSTM
-        round_uniform = ['num_params', 'rank']  # Mogrifier LSTM
+        round_uniform = ['num_params']  # Everything that's not Mogrifier LSTM
+        # round_uniform = ['num_params', 'rank']  # Mogrifier LSTM
 
         # Define the space that will be passed into the hyperopt optimizing functions
         space = [
             # hp.choice
-            hp.choice('rounds', rounds_choice),  # Mogrifier LSTM
+            # hp.choice('rounds', rounds_choice),  # Mogrifier LSTM
             # hp.uniform
             hp.uniform('num_params', 10000000, 30000000),
             hp.uniform('drop', 0., 0.8),
-            # hp.uniform('middle', 0.1, 8.),  # RRU
+            hp.uniform('middle', 0.1, 8.),  # RRU
             # hp.uniform('forget', -3., 3.),  # LSTM
-            hp.uniform('rank', 40, 90),  # Mogrifier LSTM
+            # hp.uniform('rank', 40, 90),  # Mogrifier LSTM
             # hp.loguniform
             hp.loguniform('lr', np.log(0.0001), np.log(0.01))
         ]
 
-        # def objective(num_params, drop, middle, lr):  # RRU
-        # def objective(num_params, drop, lr):  # GRU
-        # def objective(num_params, drop, forget, lr):  # LSTM
-        def objective(rounds, num_params, drop, rank, lr):  # Mogrifier LSTM
+        def objective(num_params, drop, middle, lr):  # RRU
+            # def objective(num_params, drop, lr):  # GRU
+            # def objective(num_params, drop, forget, lr):  # LSTM
+            # def objective(rounds, num_params, drop, rank, lr):  # Mogrifier LSTM
             # The function inputs must be in the same order as they are specified in the space variable
             # This function does the same steps as the above code (when hyperparameter optimization is off), but it has
             # to set the passed variables (some of them need some additional actions) and return the metric that has to
@@ -754,26 +754,27 @@ if __name__ == '__main__':  # Main function
 
             # We need to round some of the "hp.uniform" values
             num_params = round(num_params)
-            rank = round(rank)  # Mogrifier LSTM
+            # rank = round(rank)  # Mogrifier LSTM
 
             # We'll optimize these parameters (we need to set them globally, because we use global variables in some of
             # the model functions, so the code is clearer and it doesn't need too many variables in each function)
-            # global number_of_parameters, dropout_rate, middle_layer_size_multiplier, learning_rate  # RRU
+            global number_of_parameters, dropout_rate, middle_layer_size_multiplier, learning_rate  # RRU
             # global number_of_parameters, dropout_rate, learning_rate  # GRU
             # global number_of_parameters, dropout_rate, forget_bias, learning_rate  # LSTM
-            global feature_mask_rounds, number_of_parameters, dropout_rate, feature_mask_rank, learning_rate  # Mogrifier LSTM
-            feature_mask_rounds = rounds  # Mogrifier LSTM
+            # global feature_mask_rounds, number_of_parameters, dropout_rate, feature_mask_rank, learning_rate  # Mogrifier LSTM
+            # feature_mask_rounds = rounds  # Mogrifier LSTM
             number_of_parameters = num_params
             dropout_rate = drop
-            # middle_layer_size_multiplier = middle  # RRU
+            middle_layer_size_multiplier = middle  # RRU
             # forget_bias = forget  # LSTM
-            feature_mask_rank = rank  # Mogrifier LSTM
+            # feature_mask_rank = rank  # Mogrifier LSTM
             learning_rate = lr
 
             # We set an output path that includes the configuration, so we can later see the values in TensorBoard
             global output_path
             output_path = f"{log_path}{model_name}/{data_set_name}/{current_time}" \
-                          f"/rounds{rounds}num_params{num_params}drop{drop}rank{rank}lr{lr}"  # Mogrifier LSTM
+                          f"/num_params{num_params}drop{drop}middle{middle}lr{lr}"  # RRU
+            # f"/rounds{rounds}num_params{num_params}drop{drop}rank{rank}lr{lr}"  # Mogrifier LSTM
             # f"/num_params{num_params}drop{drop}forget{forget}lr{lr}"  # LSTM
             # f"/num_params{num_params}drop{drop}lr{lr}"  # GRU
             # f"/num_params{num_params}drop{drop}middle{middle}lr{lr}"  # RRU
