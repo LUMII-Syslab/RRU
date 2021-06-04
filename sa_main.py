@@ -108,7 +108,7 @@ tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 # Things we will later remove
 dropout_rate = 0.5
 # RRU
-z_transformations = 2
+relu_layers = 2
 middle_layer_size_multiplier = 2
 # LSTM
 forget_bias = 1.0
@@ -160,7 +160,7 @@ class SentimentAnalysisModel:
             if cell_name in ["RRU", "GRRUA"]:  # RRU
                 cell = cell_fn(hidden_units,
                                training=training,
-                               z_transformations=z_transformations,
+                               relu_layers=relu_layers,
                                output_size=output_size,
                                middle_layer_size_multiplier=middle_layer_size_multiplier,
                                dropout_rate=dropout_rate)

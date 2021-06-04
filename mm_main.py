@@ -105,7 +105,7 @@ tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 # Cell specific variables that we will delete later
 dropout_rate = 0.5
 # RRU
-z_transformations = 1
+relu_layers = 1
 middle_layer_size_multiplier = 2
 # LSTM
 forget_bias = 1.0
@@ -148,7 +148,7 @@ class MusicModelingModel:
             if cell_name in ["RRU", "GRRUA"]:  # RRU
                 cell = cell_fn(hidden_units,
                                training=training,
-                               z_transformations=z_transformations,
+                               relu_layers=relu_layers,
                                output_size=output_size,
                                middle_layer_size_multiplier=middle_layer_size_multiplier,
                                dropout_rate=dropout_rate)

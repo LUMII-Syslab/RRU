@@ -20,7 +20,7 @@ class RRUCell(LayerRNNCell):
     Args:
         num_units: int, The number of units in the RRU cell.
         output_size: int, The size of the RRU output.
-        z_transformations: int, The number of Z transformations in the RRU cell.
+        relu_layers: int, The number of Z transformations in the RRU cell.
         middle_layer_size_multiplier: int, The size multiplier for transformation layer in the RRU cell.
         dropout_rate: float, The dropout rate used after the W transformation.
         training: boolean, To let know whether the RRU cell is in training or not.
@@ -38,7 +38,7 @@ class RRUCell(LayerRNNCell):
     def __init__(self,
                  num_units,
                  output_size=256,
-                 z_transformations=1,
+                 relu_layers=1,
                  middle_layer_size_multiplier=2,  # TODO: find the optimal value (this goes to n_middle_maps)
                  dropout_rate=0.5,
                  gate_bias=1.0,
@@ -55,7 +55,7 @@ class RRUCell(LayerRNNCell):
 
         self._num_units = num_units
         self._output_size = output_size
-        self._z_transformations = z_transformations
+        self._relu_layers = relu_layers
         self._middle_layer_size_multiplier = middle_layer_size_multiplier
         self._dropout_rate = dropout_rate
         self._training = training
@@ -81,7 +81,7 @@ class RRUCell(LayerRNNCell):
         n_middle_maps = round(self._middle_layer_size_multiplier * total)
         self._Z_kernel = []
         self._Z_bias = []
-        for i in range(self._z_transformations):
+        for i in range(self._relu_layers):
             if i == 0:  # The first Z transformation has a different shape
                 z_kernel = self.add_variable(
                     "Z/%s" % _WEIGHTS_VARIABLE_NAME,
@@ -127,7 +127,7 @@ class RRUCell(LayerRNNCell):
 
         # Go through first transformation(s) - Z
         z_start = input_and_state  # This will hold the info that each Z transformation has to transform
-        for i in range(self._z_transformations):
+        for i in range(self._relu_layers):
             # Multiply the matrices
             after_z = math_ops.matmul(z_start, self._Z_kernel[i]) + self._Z_bias[i]
 
@@ -172,7 +172,7 @@ class RRUCell(LayerRNNCell):
             "output_size": self._output_size,
             "reuse": self._reuse,
             "training": self._training,
-            "z_transformations": self._z_transformations,
+            "relu_layers": self._relu_layers,
             "middle_layer_size_multiplier": self._middle_layer_size_multiplier,
             "dropout_rate": self._dropout_rate
         }

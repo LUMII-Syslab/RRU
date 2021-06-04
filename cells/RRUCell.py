@@ -21,10 +21,9 @@ class RRUCell(LayerRNNCell):
     Args:
         num_units: int, The number of units in the RRU cell.
         output_size: int, The size of the RRU output.
-        z_transformations: int, The number of Z transformations in the RRU cell.
+        relu_layers: int, The number of Z transformations in the RRU cell.
         middle_layer_size_multiplier: int, The size multiplier for transformation layer in the RRU cell.
         dropout_rate: float, The dropout rate used after the W transformation.
-        residual_weight_initial_value: float, Value of the residual weight (must be in range (0 - 1]).
         training: boolean, To let know whether the RRU cell is in training or not.
         reuse: (optional) Python boolean describing whether to reuse variables in an
             existing scope.  If not `True`, and the existing scope already has the
@@ -40,10 +39,9 @@ class RRUCell(LayerRNNCell):
     def __init__(self,
                  num_units,
                  output_size=256,
-                 z_transformations=1,
-                 middle_layer_size_multiplier=2,  # TODO: find the optimal value (this goes to n_middle_maps)
+                 relu_layers=1,
+                 middle_layer_size_multiplier=2,
                  dropout_rate=0.5,
-                 residual_weight_initial_value=0.95,#unused
                  training=False,
                  reuse=None,
                  name=None,
@@ -57,11 +55,9 @@ class RRUCell(LayerRNNCell):
 
         self._num_units = num_units
         self._output_size = output_size
-        self._z_transformations = z_transformations
+        self._relu_layers = relu_layers
         self._middle_layer_size_multiplier = middle_layer_size_multiplier
         self._dropout_rate = dropout_rate
-        assert 0 < residual_weight_initial_value <= 1
-        self._residual_weight_initial_value = residual_weight_initial_value
         self._training = training
         self._kernel_initializer = None
         self._bias_initializer = tf.zeros_initializer()
@@ -82,34 +78,35 @@ class RRUCell(LayerRNNCell):
         input_depth = inputs_shape[-1]
         total = input_depth + self._num_units
         n_middle_maps = round(self._middle_layer_size_multiplier * total)
-        self.mul_lr_multiplier = 10.
-        self._Z_kernel = []
-        self._Z_bias = []
-        for i in range(self._z_transformations):
+        self.mul_lr_multiplier = 10.  # So adam optimizer uses 10 times larger learning rate for this parameter
+        self._J_kernel = []
+        self._J_bias = []
+        for i in range(self._relu_layers):
             if i == 0:  # The first Z transformation has a different shape
-                z_kernel = self.add_variable(
-                    "Z/%s" % _WEIGHTS_VARIABLE_NAME,
+                j_kernel = self.add_variable(
+                    "J/%s" % _WEIGHTS_VARIABLE_NAME,
                     shape=[total, n_middle_maps],
                     initializer=self._kernel_initializer)
-                z_bias = self.add_variable(
-                    "Z/%s" % _BIAS_VARIABLE_NAME,
+                j_bias = self.add_variable(
+                    "J/%s" % _BIAS_VARIABLE_NAME,
                     shape=[n_middle_maps],
                     initializer=self._bias_initializer)
             else:
-                z_kernel = self.add_variable(
-                    f"Z{i + 1}/%s" % _WEIGHTS_VARIABLE_NAME,
+                j_kernel = self.add_variable(
+                    f"J{i + 1}/%s" % _WEIGHTS_VARIABLE_NAME,
                     shape=[n_middle_maps, n_middle_maps],
                     initializer=self._kernel_initializer)
-                z_bias = self.add_variable(
-                    f"Z{i + 1}/%s" % _BIAS_VARIABLE_NAME,
+                j_bias = self.add_variable(
+                    f"J{i + 1}/%s" % _BIAS_VARIABLE_NAME,
                     shape=[n_middle_maps],
                     initializer=self._bias_initializer)
-            self._Z_kernel.append(z_kernel)
-            self._Z_bias.append(z_bias)
+            self._J_kernel.append(j_kernel)
+            self._J_bias.append(j_bias)
         self.S_bias_variable = self.add_variable(
             "S/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
-            initializer = init_ops.constant_initializer(inv_sigmoid(np.random.uniform(0.01, 0.99, size=self._num_units)) / self.mul_lr_multiplier, dtype=self.dtype))
+            initializer=init_ops.constant_initializer(inv_sigmoid(np.random.uniform(0.01, 0.99, size=self._num_units))
+                                                      / self.mul_lr_multiplier, dtype=self.dtype))
         self._W_kernel = self.add_variable(
             "W/%s" % _WEIGHTS_VARIABLE_NAME,
             shape=[n_middle_maps, self._num_units + self._output_size],
@@ -118,7 +115,7 @@ class RRUCell(LayerRNNCell):
             "W/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units + self._output_size],
             initializer=self._bias_initializer)
-        self._W_mul = self.add_variable(
+        self._Z_ReZero = self.add_variable(
             "W_smul/%s" % _BIAS_VARIABLE_NAME,
             shape=[self._num_units],
             initializer=tf.zeros_initializer())
@@ -134,38 +131,39 @@ class RRUCell(LayerRNNCell):
         else:
             dropout_rate = 0.
 
-        # Concatenate input and last state
+        # Concatenate input and last state (for faster calculation)
         input_and_state = array_ops.concat([inputs, state], 1)  # Inputs are batch_size x depth
 
-        # Go through first transformation(s) - Z
-        z_start = input_and_state  # This will hold the info that each Z transformation has to transform
-        for i in range(self._z_transformations):
+        # Go through first transformation(s) - J
+        j_start = input_and_state  # This will hold the info that each J transformation has to transform
+        for i in range(self._relu_layers):
             # Multiply the matrices
-            after_z = math_ops.matmul(z_start, self._Z_kernel[i]) + self._Z_bias[i]
+            after_j = math_ops.matmul(j_start, self._J_kernel[i]) + self._J_bias[i]
 
-            if i == 0:  # For the first Z transformation do normalization
+            if i == 0:  # For the first J transformation do normalization
                 # Do instance normalization
-                after_z = instance_norm(after_z)
+                after_j = instance_norm(after_j)
 
             # Do ReLU activation
-            after_activation = tf.nn.relu(after_z)
+            after_activation = tf.nn.relu(after_j)
 
-            # Update the z_start variable with the newest values
-            z_start = after_activation
+            # Update the j_start variable with the newest values
+            j_start = after_activation
 
         # Apply dropout
-        after_dropout = tf.nn.dropout(z_start, rate=dropout_rate)
+        after_dropout = tf.nn.dropout(j_start, rate=dropout_rate)
 
-        # Go through the second transformation - W
+        # Go through the second transformation - W (W^c and W^o from the paper)
         after_w = math_ops.matmul(after_dropout, self._W_kernel) + self._W_bias
 
-        # Calculate the output
+        # Calculate the output (o_t)
         output = after_w[:, self._num_units:]
 
-        # Calculate the state's final values
+        # Calculate the candidate value (c)
         candidate = after_w[:, 0:self._num_units]
 
-        final_state = state * tf.sigmoid(self.S_bias_variable * self.mul_lr_multiplier) + candidate * self._W_mul
+        # Calculate the state's final values (h_t)
+        final_state = state * tf.sigmoid(self.S_bias_variable * self.mul_lr_multiplier) + candidate * self._Z_ReZero
 
         return output, final_state
 
@@ -180,10 +178,9 @@ class RRUCell(LayerRNNCell):
             "output_size": self._output_size,
             "reuse": self._reuse,
             "training": self._training,
-            "z_transformations": self._z_transformations,
+            "relu_layers": self._relu_layers,
             "middle_layer_size_multiplier": self._middle_layer_size_multiplier,
-            "dropout_rate": self._dropout_rate,
-            "residual_weight_initial_value": self._residual_weight_initial_value
+            "dropout_rate": self._dropout_rate
         }
         base_config = super(RRUCell, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))

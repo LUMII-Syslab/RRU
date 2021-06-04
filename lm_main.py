@@ -123,7 +123,7 @@ tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 # Things we will later remove
 dropout_rate = 0.7
 # RRU
-z_transformations = 2
+relu_layers = 2
 middle_layer_size_multiplier = 4
 # LSTM
 forget_bias = 1.0
@@ -174,7 +174,7 @@ class LanguageModelingModel:
                 cell = cell_fn(hidden_units,
                                training=training,
                                output_size=output_size,
-                               z_transformations=z_transformations,
+                               relu_layers=relu_layers,
                                middle_layer_size_multiplier=middle_layer_size_multiplier,
                                dropout_rate=dropout_rate)
             elif cell_name in ["LSTM"]:  # LSTM
