@@ -171,19 +171,19 @@ Our model achieves the following performance on aforementioned data sets:
 
 <!-- ### [Image Classification on ImageNet](https://paperswithcode.com/sota/image-classification-on-imagenet) -->
 
-| Task                                  | Tuned | RRU    | GRU    | LSTM   | Mogrifier LSTM |
-| ------------------------------------- | ----- | ------ | ------ | ------ | -------------- |
-| Music JSB Chorales (NLL)              | +     | 7.72   | 8.20   | 8.33   | 8.18           |
-| Music Nottingham (NLL)                | +     | 2.92   | 3.22   | 3.25   | 3.28           |
-| Music MuseData (NLL)                  | +     | 7.03   | 7.31   | 7.24   | 7.22           |
-| Music Piano-midi.de (NLL)             | +     | 7.38   | 7.58   | 7.54   | 7.52           |
-| Word-level Penn Treebank (Perplexity) | +     | 102.56 | 122.21 | 140.35 | 126.88         |
-| Character-level Penn Treebank (BPC)   | +/-   | 1.27   | 1.28   | 1.34   | 1.29           |
-| Character-level enwik8 (BPC)          | -     | 1.37   | 1.53   | 1.49   | 1.36           |
-| Character-level text8 (BPC)           | -     | 1.35   | 1.55   | 1.44   | 1.37           |
-| Sentiment analysis IMDB (Accuracy)    | -     | 87.20  | 87.04  | 85.89  | 86.23          |
-| Sequential MNIST (Accuracy)           | -     | 98.74  | 98.36  | 92.88  | 98.14          |
-| Permuted MNIST (Accuracy)             | -     | 97.67  | 98.68  | 97.39  | 97.81          |
+| Task                                  | Tuned | RRU        | GRU        | LSTM   | Mogrifier LSTM |
+| ------------------------------------- | ----- | ---------- | ---------- | ------ | -------------- |
+| Music JSB Chorales (NLL)              | +     | **7.72**   | 8.20       | 8.33   | 8.18           |
+| Music Nottingham (NLL)                | +     | **2.92**   | 3.22       | 3.25   | 3.28           |
+| Music MuseData (NLL)                  | +     | **7.03**   | 7.31       | 7.24   | 7.22           |
+| Music Piano-midi.de (NLL)             | +     | **7.38**   | 7.58       | 7.54   | 7.52           |
+| Word-level Penn Treebank (Perplexity) | +     | **102.56** | 122.21     | 140.35 | 126.88         |
+| Character-level Penn Treebank (BPC)   | +/-   | **1.27**   | 1.28       | 1.34   | 1.29           |
+| Character-level enwik8 (BPC)          | -     | 1.37       | 1.53       | 1.49   | **1.36**       |
+| Character-level text8 (BPC)           | -     | **1.35**   | 1.55       | 1.44   | 1.37           |
+| Sentiment analysis IMDB (Accuracy)    | -     | **87.20**  | 87.04      | 85.89  | 86.23          |
+| Sequential MNIST (Accuracy)           | -     | **98.74**  | 98.36      | 92.88  | 98.14          |
+| Permuted MNIST (Accuracy)             | -     | 97.67      | **98.68**  | 97.39  | 97.81          |
 
 <!--
 ## Contributing
