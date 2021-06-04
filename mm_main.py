@@ -32,8 +32,6 @@ from hyperopt import hp, tpe, Trials, fmin
 # Importing a great optimizer
 from RAdam import RAdamOptimizer
 
-from lm_utils import get_zeros_state  # Mine
-
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
 # import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
@@ -57,7 +55,7 @@ fixed_batch_size = False  # bool
 shuffle_data = True  # bool
 # 2. Model parameters
 # Name of the cell you want to test
-cell_name = "SRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
+cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
 # Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
 HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
 # Number of maximum allowed trainable parameters
@@ -78,7 +76,7 @@ num_epochs = 1000000  # int, >= 1
 # After how many epochs with no performance gain should we early stop? (0 disabled)
 break_epochs_no_gain = 7  # int, >= 0
 # Should we do hyperparameter optimization?
-do_hyperparameter_optimization = False  # bool
+do_hyperparameter_optimization = True  # bool
 # How many runs should we run hyperparameter optimization
 optimization_runs = 100  # int, >= 1
 # Path, where we will save the model for further evaluating
@@ -88,7 +86,7 @@ log_path = 'logdir_mm/'  # string
 # After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 100  # integer, >= 0
+print_after_this_many_steps = 1  # 00  # integer, >= 0
 
 # Get information about the picked cell
 cell_fn, model_name, has_separate_output_size, _ = get_cell_information(cell_name)
@@ -144,12 +142,6 @@ class MusicModelingModel:
         # Batch size list of sequence multipliers, to get a fair loss
         sequence_length_matrix = tf.placeholder(tf.float32, [None, window_size], name="sequence_length_matrix")
 
-        # Some cells use output size that differs from the hidden_size. And if the cell doesn't use a different
-        # output_size, we need to make it as hidden units for the program to work.
-        final_size = output_size
-        if final_size is None:
-            final_size = hidden_units
-
         # Create the RNN cell, corresponding to the one you chose
         cells = []
         for _ in range(number_of_layers):
@@ -165,16 +157,16 @@ class MusicModelingModel:
             elif cell_name in ["MogrifierLSTM"]:  # Mogrifier LSTM
                 cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate,
                                feature_mask_rank=feature_mask_rank, feature_mask_rounds=feature_mask_rounds)
-            elif cell_name in ["SRU"]:
-                # hidden_units *= 6
-                # Where should we place hidden units?
-                cell = cell_fn(num_stats=hidden_units//6, mavg_alphas=[0.0, 0.1, 0.3, 0.6, 0.9, 0.9999], recur_dims=hidden_units)# hidden state should be divided by len(alphas)
-                final_size = (hidden_units//6)*6
             else:  # GRU
                 cell = cell_fn(hidden_units, training=training, dropout_rate=dropout_rate)
             cells.append(cell)
         cell = tf.contrib.rnn.MultiRNNCell(cells)
 
+        # Some cells use output size that differs from the hidden_size. And if the cell doesn't use a different
+        # output_size, we need to make it as hidden units for the program to work.
+        final_size = output_size
+        if final_size is None:
+            final_size = hidden_units
 
         # Extract the batch size - this allows for variable batch size
         current_batch_size = tf.shape(x)[0]
@@ -193,7 +185,7 @@ class MusicModelingModel:
         # value = tf.nn.relu(value)
 
         # Reshape outputs from [batch_size, window_size, final_size] to [batch_size x window_size, final_size]
-        last = tf.reshape(value, shape=[-1, final_size])
+        last = tf.reshape(value, shape=(-1, final_size))
 
         # Instantiate weights and biases
         weight = tf.get_variable("output", [final_size, vocabulary_size])
@@ -203,7 +195,7 @@ class MusicModelingModel:
         prediction = tf.matmul(last, weight) + bias  # What we actually do is calculate the loss over the batch
         # Reshape the predictions to match y dimensions
         # From [batch_size x window_size, vocabulary_size] to [batch_size, window_size, vocabulary_size]
-        prediction = tf.reshape(prediction, shape=[-1, window_size, vocabulary_size])
+        prediction = tf.reshape(prediction, shape=(-1, window_size, vocabulary_size))
 
         # Calculate NLL loss
         # After the next operation, shape will be [batch_size, window_size, vocabulary_size]
@@ -215,8 +207,15 @@ class MusicModelingModel:
         # After the next operation, the shape will be [1]
         loss = tf.reduce_mean(loss)
 
+        # Printing trainable variables which have "kernel" in their name
+        decay_vars = [v for v in tf.trainable_variables() if 'kernel' in v.name]
+        for c in decay_vars:
+            print(c)
+
         # Declare our optimizer, we have to check which one works better.
         optimizer = RAdamOptimizer(learning_rate=learning_rate,
+                                   L2_decay=0.0,
+                                   decay_vars=decay_vars,
                                    clip_gradients=clip_gradients, clip_multiplier=clip_multiplier).minimize(loss)
 
         # What to log to TensorBoard if a number was specified for "log_after_this_many_steps" variable
@@ -348,7 +347,7 @@ class MusicModelingModel:
                 start_time = time.time()
 
                 for i in range(num_validation_batches):
-                    # Get batches of data
+                    # Get a batches of data
                     x_batch = get_batch(x_valid, i, batch_size, fixed_batch_size)
                     y_batch = get_batch(y_valid, i, batch_size, fixed_batch_size)
                     sequence_length_batch = get_batch(sequence_lengths_valid, i, batch_size, fixed_batch_size)
@@ -551,16 +550,15 @@ if __name__ == '__main__':  # Main function
         # Test the last saved model
         MODEL.evaluate(TESTING_DATA)
     else:  # If hyperparameter optimization is on
-        rounds_choice = [5, 6]  # Mogrifier LSTM
+        rounds_choice = [5, 6]
         # We need this, so we can print the hp.choice answers normally
         choices = {
-            'rounds': rounds_choice  # Mogrifier LSTM
+            'rounds': rounds_choice
         }
 
         # Add all hp.uniform values that need to be rounded in this list (we need this, so we later can print the values
         # rounded)
-        # round_uniform = ['num_params']  # Everything that's not Mogrifier LSTM
-        round_uniform = ['num_params', 'rank']  # Mogrifier LSTM
+        round_uniform = ['num_params', 'rank']
 
         # Define the space that will be passed into the hyperopt optimizing functions
         space = [
@@ -579,7 +577,7 @@ if __name__ == '__main__':  # Main function
         # def objective(num_params, drop, middle, lr):  # RRU
         # def objective(num_params, drop, lr):  # GRU
         # def objective(num_params, drop, forget, lr):  # LSTM
-        def objective(rounds, num_params, drop, rank, lr):  # Mogrifier LSTM
+        def objective(rounds, num_params, drop, rank, lr):  # LSTM
             # The function inputs must be in the same order as they are specified in the space variable
             # This function does the same steps as the above code (when hyperparameter optimization is off), but it has
             # to set the passed variables (some of them need some additional actions) and return the metric that has to
@@ -587,7 +585,7 @@ if __name__ == '__main__':  # Main function
 
             # We need to round some of the "hp.uniform" values
             num_params = round(num_params)
-            rank = round(rank)  # Mogrifier LSTM
+            rank = round(rank)
 
             # We'll optimize these parameters (we need to set them globally, because we use global variables in some of
             # the model functions, so the code is clearer and it doesn't need too many variables in each function)

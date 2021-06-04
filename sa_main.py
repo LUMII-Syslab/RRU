@@ -86,7 +86,7 @@ log_path = 'logdir_sa/'  # string
 # After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 100  # integer, >= 0
+print_after_this_many_steps = 1  # 00  # integer, >= 0
 
 # There are 2 classes for sentiment analysis for the "IMDB" data set
 num_classes = 2

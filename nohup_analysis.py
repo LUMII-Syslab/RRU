@@ -23,7 +23,7 @@ try:
                     best_nll = [value, current_trial]
 
     print(f"Worst NLL - {worst_nll[0]} @ Trial {worst_nll[1]}")
-    print(f"Average NLL - {average_nll / current_trial}")
+    print(f"Average NLL - {average_nll / (current_trial - nan_counter)}")
     print(f"Best NLL - {best_nll[0]} @ Trial {best_nll[1]}")
     print(f"NAN's encountered - {nan_counter}")
     f.close()

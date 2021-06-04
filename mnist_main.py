@@ -55,7 +55,7 @@ cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "Mogri
 # Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
 HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
 # Number of maximum allowed trainable parameters
-number_of_parameters = 100000  # int, >= 1 (Probably way more than 1)
+number_of_parameters = 70000  # int, >= 1 (Probably way more than 1)
 # With what learning rate we optimize the model
 learning_rate = 0.001  # float, > 0
 # How many RNN layers should we have
@@ -83,9 +83,9 @@ log_path = 'logdir_mnist/'  # string
 # After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
-print_after_this_many_steps = 100  # integer, >= 0
+print_after_this_many_steps = 1  # 00  # integer, >= 0
 
-# There are 10 classes for sentiment analysis for the "MNIST" data set
+# There are 2 classes for sentiment analysis for the "MNIST" data set
 num_classes = 10
 # How many time steps we will unroll in RNN. MNIST when flattened has 784 sequence length
 sequence_length = 784
@@ -105,9 +105,9 @@ output_path = log_path + model_name + f'/{data_set_name}/' + current_time
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 # Things we will later remove
-dropout_rate = 0.5
+dropout_rate = 0.7
 # RRU
-z_transformations = 2
+z_transformations = 1
 middle_layer_size_multiplier = 2
 # LSTM
 forget_bias = 1.0
@@ -508,8 +508,6 @@ if __name__ == '__main__':  # Main function
         # Test the last saved model
         MODEL.evaluate(X_TEST, Y_TEST)
     else:  # If hyperparameter optimization is on
-        ''' Haven't updated these yet for MNIST! '''
-
         # rounds_choice = [5, 6]  # Mogrifier LSTM
         # We need this, so we can print the hp.choice answers normally
         choices = {

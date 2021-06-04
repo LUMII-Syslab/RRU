@@ -45,7 +45,7 @@ from RAdam import RAdamOptimizer
 data_set_name = "enwik8"  # string, one of these ["enwik8", "text8", "pennchar", "penn"]
 # How many time steps we will unroll in RNN
 # We do character-level 512, word-level 64
-window_size = 512  # int, >= 1 (if model isn't stateful or continuous_batches) else 1 or (>= 1 and % 2 == 0)
+window_size = 256  # int, >= 1 (if model isn't stateful or continuous_batches) else 1 or (>= 1 and % 2 == 0)
 # How many data samples we feed in a single time
 batch_size = 64  # int, >= 1
 # Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
@@ -87,7 +87,7 @@ outer_dropout = 0  # float, 0 <= value <= 1
 # How many epochs should we run?
 num_epochs = 1000000  # int, >= 1
 # After how many epochs with no performance gain should we early stop? (0 disabled)
-break_epochs_no_gain = 11  # int, >= 0
+break_epochs_no_gain = 3  # int, >= 0
 # Should we do hyperparameter optimization?
 do_hyperparameter_optimization = False  # bool
 # How many runs should we run hyperparameter optimization
@@ -99,7 +99,7 @@ log_path = 'logdir_lm/'  # string
 # After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
 # After how many steps should we print the results of training/validation/testing (0 - don't print until the last step)
-print_after_this_many_steps = 100  # integer, >= 0
+print_after_this_many_steps = 1  # 00  # integer, >= 0
 
 # We need to know whether the data set is character-level or word-level
 character_level = True
