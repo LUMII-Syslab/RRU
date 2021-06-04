@@ -1,4 +1,4 @@
-# My Paper Title
+# Gates are not what you need in RNNs
 
 This repository is the official implementation of [Gates are not what you need in RNNs](https://www.google.com/search?q=google+arxiv). 
 
