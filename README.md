@@ -1,8 +1,12 @@
 # Gates are not what you need in RNNs
-
-This repository is the official implementation of [Gates are not what you need in RNNs](https://www.google.com/search?q=google+arxiv). 
-
-<!-- 📋  Optional: include a graphic explaining your approach/main result, bibtex entry, link to demos, blog posts and tutorials -->
+This repository contains the official TensorFlow implementation of the following paper:
+> **Gates are not what you need in RNNs**
+> 
+> by  Ronalds Zakovskis, Andis Draguns, Eliza Gaile, Emils Ozolins, Karlis Freivalds  
+> 
+> [[arXiv]](https://github.com/LUMII-Syslab/RRU)
+> 
+>  Abstract: _Recurrent neural networks have flourished in many areas. Consequently, we can see new RNN cells being developed continuously, usually by creating or using gates in a new, original way. But what if we told you that gates in RNNs are redundant? In this paper, we propose a new recurrent cell called 'Residual Recurrent Unit' (RRU) which beats traditional cells and does not employ a single gate. It is based on the residual function together with linear transformations, ReLU, and normalization. To evaluate our cell's effectiveness, we compare its performance against the widely-used GRU and LSTM cells and the recently proposed Mogrifier LSTM on several tasks including, polyphonic music modelling, language modelling, and sentiment analysis. Our experiments show that RRU outperforms the traditional gated units on most of these tasks. Also, it has better robustness to parameter selection, allowing immediate application in new tasks without much tuning._
 
 ## Requirements
 
@@ -153,12 +157,7 @@ You change the training / validation / testing hyperparameters at the top of the
 
 ### MNIST image classification
 
-1 - To prepare the data, run:
-```
-python -u mnist_utils.py
-```
-
-2 - To start training/validation/testing, run:
+1 - To start training/validation/testing, run:
 ```
 python -u mnist_main.py
 ```
