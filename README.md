@@ -71,9 +71,9 @@ conda activate RRU
 
 ```
 conda install tensorflow-gpu=1.15
-/host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install sklearn
-/host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
-/host-dir/ronalds/miniconda3/envs/RRU/bin/pip3 install hyperopt
+pip3 install sklearn
+pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
+pip3 install hyperopt
 ```
 
 ## Training & Evaluation
