@@ -8,9 +8,13 @@ This repository contains the official TensorFlow implementation of the following
 > 
 >  Abstract: _Recurrent neural networks have flourished in many areas. Consequently, we can see new RNN cells being developed continuously, usually by creating or using gates in a new, original way. But what if we told you that gates in RNNs are redundant? In this paper, we propose a new recurrent cell called 'Residual Recurrent Unit' (RRU) which beats traditional cells and does not employ a single gate. It is based on the residual function together with linear transformations, ReLU, and normalization. To evaluate our cell's effectiveness, we compare its performance against the widely-used GRU and LSTM cells and the recently proposed Mogrifier LSTM on several tasks including, polyphonic music modelling, language modelling, and sentiment analysis. Our experiments show that RRU outperforms the traditional gated units on most of these tasks. Also, it has better robustness to parameter selection, allowing immediate application in new tasks without much tuning._
 
+We show that gates are not essential at all to construct a well-performing recurrent unit. To this end, we develop a recurrent cell not containing a single gate – the RRU. The proposed cell surpasses not only GRU and LSTM but also the currently best Mogrifier LSTM on many commonly used benchmark tasks. Our cell is based on a residual ReLU network employing normalization and ReZero recurrent state update. The structure of the RRU with two state-input linear transformations is as follows:
+
+![RRU](assets/RRU.png)
+
 ## Requirements
 
-### 1. Download the data sets (177 MB total)
+### 1. Download the data sets
 
 To get the data sets, you must run the script which downloads the data by:
 ```
@@ -41,57 +45,17 @@ http://www-etud.iro.umontreal.ca/~boulanni/icml2012 .
 
 ### 2. Prepare your environment
 
-DISCLAIMER: Parts of this project may work with your current TensorFlow environment, if you have one (especially if you comment
-out the MogrifierLSTM code)
+#### Almost Working
 
-1 – Install Anaconda (if you do not have it yet)
-
-a) Download the installer
-```
-wget https://repo.anaconda.com/archive/Anaconda3-2020.07-Linux-x86_64.sh
-```
-
-or
+For now this command uses CPU for TensorFlow, we need to fix that, but almost working:
 
 ```
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+pip install -r requirements.txt
 ```
 
-b) Run the installer
-```
-bash Anaconda3-2020.07-Linux-x86_64.sh
-```
+#### Fully working:
 
-or
-
-```
-bash Miniconda3-latest-Linux-x86_64.sh
-```
-
-c) Set the path (corresponding to the location you put it in):
-```
-export PATH=/host-dir/ronalds/anaconda3/bin:$PATH
-```
-
-or  
-
-```
-export PATH=/host-dir/ronalds/miniconda3/bin:$PATH
-```
-
-d) Test if the "conda" command works for you, for example, with:
-
-```
-conda env list
-```
-
-If it shows that it doesn't understand the command "conda", refreshing the shell usually helps:
-
-```
-source .bashrc
-```
-
-2 - Create a new "conda" environment and activate it
+Create a new "conda" environment and activate it
 
 a) "RRU" environment with some things installed
 ```
@@ -103,7 +67,7 @@ b) Activate the environment
 conda activate RRU
 ```
 
-3 – Install the remaining requirements (dm-sonnet is needed for the MogrifierLTSM)
+3 – Install the remaining requirements
 
 ```
 conda install tensorflow-gpu=1.15
