@@ -455,9 +455,6 @@ class SparseTiledLinear(AbstractTiledLinear):
     return results
 
 
-# TODO(melisgl): Since computation is the same as in TiledLinear,
-# perhaps this should be implemented as a custom getter (see
-# tf.get_variable) instead of being tied to tiling.
 class OverlaidTiledLinear(TiledLinear):
   """Tiled mapping with weight sharing and low-rank overlays.
   To reduce the number of parameters, one may want to share weight

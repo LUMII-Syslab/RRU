@@ -675,9 +675,6 @@ def mixture_of_softmaxes(x, k, e, to_logits):
     parameters (i.e. those in to_logits), but they have a smaller number
     of non-shared parameters (those in the projections).
   """
-  # TODO(melisgl): For training where the entire output distribution is not
-  # needed, maybe sparse_softmax_cross_entropy_with_logits would be more
-  # efficient.
   if True:  # pylint: disable=using-constant-test
     # This log-domain implementation seems preferrable, but it uses much more
     # memory for some reason.
@@ -840,7 +837,6 @@ def seq_softmax_cross_entropy_with_logits(logits, labels, lengths,
   with tf.name_scope(name, 'seq_softmax_cross_entropy_with_logits',
                      [logits, labels, lengths, max_length]):
     mask = create_mask(lengths, max_length)
-    # TODO(melisgl): Maybe call softmax_cross_entropy_with_logits
     # if the dtype of labels is non-integer.
     xe_terms = tf.nn.sparse_softmax_cross_entropy_with_logits(
         logits=logits, labels=labels)

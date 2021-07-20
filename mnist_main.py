@@ -27,49 +27,74 @@ from utils import print_trials_information, NetworkPrint
 
 # Hyperparameters
 # 1. Data parameters
-# Choose data set to test on
 data_set_name = "SequentialMNIST"  # string, one of these ["SequentialMNIST", "P-MNIST"]
-# How many data samples we feed in a single time (MNIST maximum batch_size is 10000)
 batch_size = 64  # int, >= 1
-# # Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
 fixed_batch_size = False  # bool
-# Should we shuffle the samples?
 shuffle_data = True  # bool
 # 2. Model parameters
-# Name of the cell you want to test
 cell_name = "RRU"  # string, one of these ["RRU", "GRRUA", "GRU", "LSTM", "MogrifierLSTM"]
-# Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
 HIDDEN_UNITS = 128  # int, >= 1 (Probably way more than 1)
-# Number of maximum allowed trainable parameters
 number_of_parameters = 70000  # int, >= 1 (Probably way more than 1)
-# With what learning rate we optimize the model
 learning_rate = 0.001  # float, > 0
-# How many RNN layers should we have
 number_of_layers = 2  # int, >= 1
-# What should be the output size for the cells that have a separate output_size?
 output_size = 64  # int, >= 1 (Probably way more than 1)
-# Should we clip the gradients?
-clip_gradients = True  # bool,
-# If clip_gradients = True, with what multiplier should we clip them?
+clip_gradients = True  # bool
 clip_multiplier = 5.  # float
 # 3. Training/testing process parameters
-# Choose your cell
-# How many epochs should we run?
 num_epochs = 1000000  # int, >= 1
-# After how many epochs with no performance gain should we early stop? (0 disabled)
 break_epochs_no_gain = 5  # int, >= 0
-# Should we do hyperparameter optimization?
 do_hyperparameter_optimization = False  # bool
-# How many runs should we run hyperparameter optimization
 optimization_runs = 100  # int, >= 1
-# Path, where we will save the model for further evaluating
 ckpt_path = 'ckpt_mnist/'  # string
-# Path, where we will store ours logs
 log_path = 'logdir_mnist/'  # string
-# After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
 log_after_this_many_steps = 0  # integer, >= 0
-# After how many steps should we print the results of training/validating/testing (0 - don't print until the last step)
 print_after_this_many_steps = 1  # 00  # integer, >= 0
+""" Hyperparameter descriptions
+    Data parameters
+        data_set_name
+            Choose data set to test on
+        batch_size
+            How many data samples we feed in a single time (MNIST maximum batch_size is 10000)
+        fixed_batch_size
+            Can some of the batches be with size [batch_size, 2 * batch_size) (So we don't have as much left over data)
+        shuffle_data
+            Should we shuffle the samples?
+    Model parameters
+        cell_name
+            Name of the cell you want to test
+        HIDDEN_UNITS
+            Number of hidden units (This will only be used if the number_of_parameters is None or < 1)
+        number_of_parameters
+            Number of maximum allowed trainable parameters
+        learning_rate
+            With what learning rate we optimize the model
+        number_of_layers
+            How many RNN layers should we have
+        output_size
+            What should be the output size for the cells that have a separate output_size?
+        clip_gradients
+            Should we clip the gradients?
+        clip_multiplier
+            If clip_gradients = True, with what multiplier should we clip them?
+    Training/testing process parameters
+        num_epochs
+            How many epochs should we run?
+        break_epochs_no_gain
+            After how many epochs with no performance gain should we early stop? (0 disabled)
+        do_hyperparameter_optimization
+            Should we do hyperparameter optimization?
+        optimization_runs
+            How many runs should we run hyperparameter optimization
+        ckpt_path
+            Path, where we will save the model for further evaluating
+        log_path
+            Path, where we will store ours logs
+        log_after_this_many_steps
+            After how many steps should we send the data to TensorBoard (0 - don't log after any amount of steps)
+        print_after_this_many_steps
+            After how many steps should we print the results of training/validating/testing (0 - don't print until the
+            last step)
+"""
 
 # There are 2 classes for sentiment analysis for the "MNIST" data set
 num_classes = 10
