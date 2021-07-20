@@ -1,16 +1,10 @@
 # This file contains the main function which, when ran, processes the downloaded data and saves it in a format we want.
 # This file also contains helper functions that are related to language modeling, such as loading data
 
-# Importing numpy so we can use numpy arrays
-import numpy as np
-
-# Importing pickle so we can read and save pickle files
 import pickle
-
-# Importing zipfile so we can open zip files
 import zipfile
 
-# Importing Tokenizer from TensorFlow so we can transform words to numbers easily
+import numpy as np
 from tensorflow.keras.preprocessing.text import Tokenizer
 
 supported_data_sets = ["enwik8", "text8", "pennchar", "penn"]

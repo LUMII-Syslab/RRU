@@ -1,12 +1,7 @@
 # This file contains helper functions that are related to sentiment analysis, such as loading data
 
-# Importing the machine learning framework
-import tensorflow as tf
-
-# Importing numpy so we can use numpy arrays
 import numpy as np
-
-# Importing sequence from TensorFlow so we can pad the sequences easily
+import tensorflow as tf
 from tensorflow.keras.preprocessing import sequence
 
 

@@ -1,14 +1,10 @@
 # This file contains the main function which, when ran, processes the downloaded data and saves it in a format we want.
 # This file also contains helper functions that are related to music modeling, such as loading data
 
-# Importing pickle so we can read and save pickle files
+import os.path
 import pickle
 
-# Importing numpy so we can use numpy arrays
 import numpy as np
-
-# Importing os.path so we can check if files and directories exist
-import os.path
 
 downloaded_data_path = "data/mm/unchanged/"
 prepared_data_path = "data/mm/ready/"

@@ -1,36 +1,22 @@
 # This file implements the main functions for running the music modeling task, this includes: model creation; model
 # training, model testing and the main function that controls all the flow
 
-# Importing the machine learning framework
-import tensorflow as tf
-
-# Importing numpy so we can use numpy arrays
-import numpy as np
-
-# We'll use this to measure time spent in training and testing
 import time
-
-# We'll use this to dynamically generate training event names (so each run has different name)
 from datetime import datetime
 
-# We'll use this to shuffle training data
+import numpy as np
+import tensorflow as tf
+from hyperopt import hp, tpe, Trials, fmin
 from sklearn.utils import shuffle
 
+from RAdam import RAdamOptimizer
+# This function will allow us to get information about the picked cell
+from cell_registry import get_cell_information
 # Importing some functions that will help us deal with the input data
 from mm_utils import load_data, split_data_in_parts
-
 # Importing some utility functions that will help us with certain tasks
 from utils import find_optimal_hidden_units, print_trainable_variables, get_batch
 from utils import print_trials_information, NetworkPrint
-
-# This function will allow us to get information about the picked cell
-from cell_registry import get_cell_information
-
-# Importing the necessary stuff for hyperparameter optimization
-from hyperopt import hp, tpe, Trials, fmin
-
-# Importing a great optimizer
-from RAdam import RAdamOptimizer
 
 # If you have many GPUs available, you can specify which one to use here (they are indexed from 0)
 # import os

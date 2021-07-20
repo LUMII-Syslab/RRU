@@ -2,10 +2,10 @@
 # will choose in other files
 
 # Importing all the cells that we need
-from cells.RRUCell import RRUCell
-from cells.GRUCell import GRUCell
 from cells.BasicLSTMCell import BasicLSTMCell
+from cells.GRUCell import GRUCell
 from cells.MogrifierLSTMCell import MogrifierLSTMCell
+from cells.RRUCell import RRUCell
 
 # This dictionary holds the configuration for each cell we have implemented (each variable is explained in the function
 # below), here you can also implement your cell by adding it's configuration (cell function / class, model name, whether

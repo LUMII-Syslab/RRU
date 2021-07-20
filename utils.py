@@ -1,14 +1,10 @@
 # This file contains all the utility functions that all implemented tasks use (share), such as printing the amount of
 # variable in the model
 
-# Importing the machine learning framework
-import tensorflow as tf
-
-# Importing numpy so we can use numpy arrays
-import numpy as np
-
-# Importing math functions such as square root and others
 import math
+
+import numpy as np
+import tensorflow as tf
 
 
 def get_total_variables():

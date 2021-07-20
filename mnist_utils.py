@@ -1,10 +1,7 @@
 # This file contains helper functions that are related to mnist sequence classification, such as loading data
 
-# Importing the machine learning framework
-import tensorflow as tf
-
-# Importing numpy so we can use numpy arrays
 import numpy as np
+import tensorflow as tf
 
 supported_data_sets = ["SequentialMNIST", "P-MNIST"]
 
