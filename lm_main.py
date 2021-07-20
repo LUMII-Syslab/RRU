@@ -451,7 +451,7 @@ class LanguageModelingModel:
 
                     # Print the batch results if it's the last batch or if step printing is turned on, and this is the
                     # step to print in
-                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0) \
                             or i == num_training_batches - 1:
                         NetworkPrint.step_results(i + 1,
                                                   num_training_batches,
@@ -674,7 +674,7 @@ class LanguageModelingModel:
 
                 # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
                 # to print in
-                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0) \
                         or i == num_batches - 1:
                     NetworkPrint.step_results(i + 1,
                                               num_batches,
@@ -761,6 +761,7 @@ if __name__ == '__main__':  # Main function
             hp.loguniform('lr', np.log(0.0001), np.log(0.01))
         ]
 
+
         def objective(num_params, drop, middle, lr):  # RRU
             # def objective(num_params, drop, lr):  # GRU
             # def objective(num_params, drop, forget, lr):  # LSTM
@@ -812,10 +813,12 @@ if __name__ == '__main__':  # Main function
             # Test the last saved model (and return it's perplexity)
             return model.evaluate(TESTING_DATA)
 
+
         # To optimize multiple hyperparameters, we need to create this function that uses *args
         # https://github.com/hyperopt/hyperopt/issues/129
         def objective2(args):
             return objective(*args)
+
 
         # Create the algorithm we are going to use for hyperparameter optimization
         tpe_algo = tpe.suggest

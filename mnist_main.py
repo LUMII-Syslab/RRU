@@ -317,7 +317,7 @@ class MNISTModel:
 
                     # Print the batch results if it's the last batch or if step printing is turned on, and this is the
                     # step to print in
-                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                    if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0) \
                             or i == num_training_batches - 1:
                         NetworkPrint.step_results(i + 1, num_training_batches, [["Loss", l], ["Accuracy", a]],
                                                   time.time() - start_time)
@@ -389,7 +389,8 @@ class MNISTModel:
                 validation_writer.add_summary(epoch_loss_summary, epoch + 1)
 
                 epoch_accuracy_summary = tf.Summary()
-                epoch_accuracy_summary.value.add(tag='validation_epoch_accuracy', simple_value=average_validation_accuracy)
+                epoch_accuracy_summary.value.add(tag='validation_epoch_accuracy',
+                                                 simple_value=average_validation_accuracy)
                 validation_writer.add_summary(epoch_accuracy_summary, epoch + 1)
                 validation_writer.flush()
 
@@ -469,7 +470,7 @@ class MNISTModel:
 
                 # Print the batch results if it's the last batch or if step printing is turned on, and this is the step
                 # to print in
-                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0)\
+                if (print_after_this_many_steps != 0 and (i + 1) % print_after_this_many_steps == 0) \
                         or i == num_batches - 1:
                     NetworkPrint.step_results(i + 1, num_batches, [["Average loss", total_loss / (i + 1)],
                                                                    ["Average accuracy", total_accuracy / (i + 1)]],
@@ -479,7 +480,8 @@ class MNISTModel:
             average_accuracy = total_accuracy / num_batches
 
             # Print the stats gained in the evaluation phase
-            NetworkPrint.evaluation_end("testing", [["Average loss", average_loss], ["Average accuracy", average_accuracy]],
+            NetworkPrint.evaluation_end("testing",
+                                        [["Average loss", average_loss], ["Average accuracy", average_accuracy]],
                                         time.time() - start_time)
 
             # We add the final loss and accuracy to TensorBoard so we don't have to dig into the console logs and nohup
@@ -544,6 +546,7 @@ if __name__ == '__main__':  # Main function
             hp.loguniform('lr', np.log(0.0001), np.log(0.01))
         ]
 
+
         # def objective(num_params, drop, lr):  # GRU
         # def objective(num_params, drop, forget, lr):  # LSTM
         # def objective(rounds, num_params, drop, rank, lr):  # Mogrifier LSTM
@@ -595,10 +598,12 @@ if __name__ == '__main__':  # Main function
             # pass the negative accuracy)
             return - model.evaluate(X_TEST, Y_TEST)
 
+
         # To optimize multiple hyperparameters, we need to create this function that uses *args
         # https://github.com/hyperopt/hyperopt/issues/129
         def objective2(args):
             return objective(*args)
+
 
         # Create the algorithm we are going to use for hyperparameter optimization
         tpe_algo = tpe.suggest

@@ -85,7 +85,7 @@ def analyse_data(data_path=downloaded_data_path, mode="full"):
     # Check if mode was specified correctly
     assert mode in ["mini", "full"], "Invalid value for variable mode, it must be \"mini\" or \"full\"!"
     # Check if the data path was specified correctly
-    assert data_path in [prepared_data_path, downloaded_data_path],\
+    assert data_path in [prepared_data_path, downloaded_data_path], \
         "Invalid value for variable data_path, it must be equal to prepared or downloaded data path!"
 
     print("Starting data analysis...")
