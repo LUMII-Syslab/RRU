@@ -16,20 +16,10 @@ We show that gates are not essential at all to construct a well-performing recur
 
 ### 1. Download the data sets
 
-To get the data sets, you must run the script which downloads the data by:
+To download the data sets, you must run:
 ```
 bash get_data.sh
 ```
-
-
-P.S. If you are on Windows, it might be a little tricky and not work, in that case you can use WSL, etc.
-<!--```
-cd '/mnt/c/Users/YOUR PATH/RRU'
-bash get_data.sh
-```-->
-	
-When these files were added to this Git repository, it threw a message "warning: LF will be replaced by CRLF in get_data.sh.
-", if this script doesn't work, the newline symbols have to be changed to match the system.
 
 Language modeling data sets are downloaded from:
 
@@ -45,36 +35,33 @@ http://www-etud.iro.umontreal.ca/~boulanni/icml2012 .
 
 ### 2. Prepare your environment
 
-#### Almost Working
+To install requirements run:
 
-For now this command uses CPU for TensorFlow, we need to fix that, but almost working:
+#### 1st way (Requires CUDA 10 if you want to use the GPU version)
 
 ```
 pip install -r requirements.txt
 ```
 
-#### Fully working:
+#### 2nd way (Requires Anaconda)
 
-Create a new "conda" environment and activate it
 
-a) "RRU" environment with some things installed
 ```
-conda create -n RRU python=3.6.9 numpy scipy
-```
+conda create -n RRU python=3.6.9
 
-b) Activate the environment
-```
 conda activate RRU
-```
 
-3 – Install the remaining requirements
-
-```
 conda install tensorflow-gpu=1.15
 pip3 install sklearn
 pip3 install --upgrade --upgrade-strategy only-if-needed dm-sonnet==1.36
 pip3 install hyperopt
 ```
+
+## Hardware requirements
+
+* Ubuntu 18.04 or newer
+* Nvidia T4 (16Gb) or better
+* 16GB of RAM
 
 ## Training & Evaluation
 
@@ -148,8 +135,6 @@ Our model achieves the following performance on aforementioned data sets:
 | Sequential MNIST (Accuracy)           | -     | **98.74**  | 98.36      | 92.88  | 98.14          |
 | Permuted MNIST (Accuracy)             | -     | 97.67      | **98.68**  | 97.39  | 97.81          |
 
-<!--
 ## Contributing
-
->📋  Pick a licence and describe how to contribute to your code repository. 
--->
+For help or issues, please submit a GitHub issue.
+For personal communications, please contact Ronalds Zakovskis (ronalds.zakovskis@lumii.lv).
